@@ -52,6 +52,8 @@ func handleConnection(conn net.Conn) {
 		message, err := reader.ReadString('\n')
 		if err != nil {
 			log.Println("con: disconnect:", conn.RemoteAddr().String())
+			// Remove the client from the clients slice upon disconnection
+			removeClient(&client)
 			return
 		} else {
 			log.Println("msg:", message, conn.RemoteAddr().String())
@@ -73,6 +75,16 @@ func handleConnection(conn net.Conn) {
 				log.Println("command: users")
 				listUsers(&client)
 			}
+		}
+	}
+}
+
+// removeClient removes a client from the clients slice.
+func removeClient(client *Client) {
+	for i, c := range clients {
+		if c.conn == client.conn {
+			clients = append(clients[:i], clients[i+1:]...)
+			break
 		}
 	}
 }
