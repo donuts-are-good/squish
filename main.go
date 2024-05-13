@@ -7,18 +7,26 @@ import (
 	"math/rand"
 	"net"
 	"strings"
+	"time"
+	"unicode"
 )
 
-// Client represents a connected client with a nickname and a connection.
 type Client struct {
 	conn     net.Conn
 	nickname string
+	channels []*Channel
 }
 
-// clients holds all connected clients.
+type Channel struct {
+	name    string
+	clients []*Client
+	topic   string
+}
+
 var clients []Client
 
-// main starts the server and handles incoming connections.
+var channels []*Channel
+
 func main() {
 	ln, err := net.Listen("tcp", ":6667")
 	if err != nil {
@@ -26,87 +34,159 @@ func main() {
 	}
 	defer ln.Close()
 
+	channels = append(channels, &Channel{name: "#general", topic: "Welcome to #general"})
+	channels = append(channels, &Channel{name: "#help", topic: "Welcome to #help"})
+
 	for {
-		// Accept a new connection.
 		conn, err := ln.Accept()
 		if err != nil {
 			log.Println(err)
 			continue
 		}
 		log.Println("con: client connected:", conn.RemoteAddr())
-		// Handle the connection in a new goroutine.
+
 		go handleConnection(conn)
 	}
 }
 
-// handleConnection manages the connection for a single client.
 func handleConnection(conn net.Conn) {
 	defer conn.Close()
 
-	// Initialize a new client with the connection.
 	client := Client{conn: conn, nickname: ""}
 	reader := bufio.NewReader(conn)
 
+	pingTicker := time.NewTicker(5 * time.Minute)
+	defer pingTicker.Stop()
+
+	timeout := time.NewTimer(10 * time.Minute)
+	defer timeout.Stop()
+
 	for {
-		// Read a message from the client.
-		message, err := reader.ReadString('\n')
-		if err != nil {
-			log.Println("con: disconnect:", conn.RemoteAddr().String())
-			// Remove the client from the clients slice upon disconnection
+		select {
+		case <-pingTicker.C:
+			conn.Write([]byte(fmt.Sprintf("PING :%s\r\n", "serverName")))
+
+		case <-timeout.C:
+			log.Println("con: timeout:", conn.RemoteAddr().String())
 			removeClient(&client)
 			return
-		} else {
-			log.Println("msg:", message, conn.RemoteAddr().String())
-		}
 
-		// Trim and split the message to extract command and parameters.
-		message = strings.Trim(message, "\r\n")
-		parts := strings.SplitN(message, " ", 2)
+		default:
+			message, err := reader.ReadString('\n')
+			if err != nil {
+				log.Println("con: disconnect:", conn.RemoteAddr().String())
+				removeClient(&client)
+				return
+			} else {
+				log.Println("msg:", message, conn.RemoteAddr().String())
+			}
 
-		if len(parts) > 1 {
-			command, params := parts[0], parts[1]
-			switch command {
-			case "NICK":
-				log.Println("command: nick")
-				// Handle nickname setting.
-				handleNick(&client, params, conn)
-			case "USERS":
-				// Handle the /users command.
-				log.Println("command: users")
-				listUsers(&client)
+			message = strings.Trim(message, "\r\n")
+			parts := strings.SplitN(message, " ", 2)
+
+			if len(parts) > 1 {
+				command, params := parts[0], parts[1]
+				switch command {
+				case "PING":
+					timeout.Reset(10 * time.Minute)
+					conn.Write([]byte(fmt.Sprintf("PONG %s\r\n", params)))
+				case "PONG":
+					timeout.Reset(10 * time.Minute)
+				case "NICK":
+					log.Println("command: nick")
+					sanitizedNickname := sanitizeString(params)
+					handleNick(&client, sanitizedNickname, conn)
+				case "USERS":
+					log.Println("command: users")
+					handleUsers(&client)
+				case "JOIN":
+					log.Println("command: join")
+					sanitizedChannelName := sanitizeString(params)
+					handleJoin(&client, sanitizedChannelName)
+				case "LIST":
+					log.Println("command: list")
+					handleList(&client)
+				case "PRIVMSG":
+					log.Println("command: privmsg")
+					targetAndMessage := strings.SplitN(params, " ", 2)
+					if len(targetAndMessage) > 1 {
+						target, message := targetAndMessage[0], targetAndMessage[1]
+						handlePrivmsg(&client, target, message)
+					}
+				}
 			}
 		}
 	}
 }
 
-// removeClient removes a client from the clients slice.
-func removeClient(client *Client) {
-	for i, c := range clients {
-		if c.conn == client.conn {
-			clients = append(clients[:i], clients[i+1:]...)
-			break
+func handlePrivmsg(client *Client, target string, message string) {
+	if strings.HasPrefix(target, "#") {
+
+		channel := findChannel(target)
+		if channel != nil {
+			broadcastMessage(channel, client, message)
+		}
+	} else {
+
+		targetClient := findClientByNickname(target)
+		if targetClient != nil {
+			targetClient.conn.Write([]byte(fmt.Sprintf(":%s PRIVMSG %s %s\r\n", client.nickname, target, message)))
+		} else {
+
+			client.conn.Write([]byte(fmt.Sprintf(":%s 401 %s No such nick/channel\r\n", "serverName", target)))
 		}
 	}
 }
 
-// handleNick sets the nickname for a client by appending a unique 4-digit number.
+func broadcastMessage(channel *Channel, sender *Client, message string) {
+	for _, client := range channel.clients {
+		if client != sender {
+			client.conn.Write([]byte(fmt.Sprintf(":%s PRIVMSG %s %s\r\n", sender.nickname, channel.name, message)))
+		}
+	}
+}
+
+func handleList(client *Client) {
+	log.Println("handleList: start")
+	for _, channel := range channels {
+		log.Println("handleList: channel name:", channel.name)
+
+		userCount := len(channel.clients)
+
+		client.conn.Write([]byte(fmt.Sprintf(":%s 322 %s %s %d %s\r\n", "serverName", client.nickname, channel.name, userCount, channel.topic)))
+	}
+}
+
+func handleUsers(client *Client) {
+	log.Println("listusers: starting")
+	var users []string
+	for _, c := range clients {
+		log.Println("listusers: client:", c.nickname)
+		users = append(users, c.nickname)
+	}
+	log.Println("listusers: writing:", users)
+
+	userList := strings.Join(users, " ")
+
+	client.conn.Write([]byte(fmt.Sprintf(":%s 265 %s %s\r\n", "serverName", client.nickname, userList)))
+}
+
 func handleNick(client *Client, nickname string, conn net.Conn) {
 	if len(nickname) > 16 {
 		client.conn.Write([]byte("ERROR: Nickname too long.\n"))
 		return
 	}
 
-	// Maximum attempts to find a unique nickname
 	maxAttempts := 100
 	attempts := 0
 
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+
 	for attempts < maxAttempts {
-		// Generate a random 4-digit number
-		randomNumber := rand.Intn(9000) + 1000
-		// Append the random number to the nickname
+		randomNumber := r.Intn(9000) + 1000
+
 		uniqueNickname := fmt.Sprintf("%s(#%04d)", nickname, randomNumber)
 
-		// Check if the nickname is already in use
 		isUnique := true
 		for _, c := range clients {
 			if c.nickname == uniqueNickname {
@@ -116,10 +196,8 @@ func handleNick(client *Client, nickname string, conn net.Conn) {
 		}
 
 		if isUnique {
-			// If unique, set the nickname and break the loop
 			client.nickname = uniqueNickname
 
-			// Remove the old client entry from the clients slice
 			for i, c := range clients {
 				if c.conn == client.conn {
 					clients = append(clients[:i], clients[i+1:]...)
@@ -127,7 +205,6 @@ func handleNick(client *Client, nickname string, conn net.Conn) {
 				}
 			}
 
-			// Add the updated client to the clients slice
 			clients = append(clients, *client)
 			client.conn.Write([]byte(fmt.Sprintf("NICK %s\n", uniqueNickname)))
 			return
@@ -136,23 +213,84 @@ func handleNick(client *Client, nickname string, conn net.Conn) {
 		attempts++
 	}
 
-	// If no unique nickname could be found after max attempts, disconnect the client
 	client.conn.Write([]byte("ERROR: Unable to assign a unique nickname.\n"))
 	conn.Close()
 }
 
-// listUsers sends a list of all connected users to the requesting client.
-func listUsers(client *Client) {
-	log.Println("listusers: starting")
-	var users []string
-	for _, c := range clients {
-		log.Println("listusers: client:", c.nickname)
-		users = append(users, c.nickname)
+func handleJoin(client *Client, channelName string) {
+	if !strings.HasPrefix(channelName, "#") {
+		channelName = "#" + channelName
 	}
-	log.Println("listusers: writing:", users)
-	// Convert the slice of nicknames into a single string with each nickname separated by a space
-	userList := strings.Join(users, " ")
-	// Write the list of users to the client's connection, ensuring the message ends with \r\n
-	// Format the message according to IRC protocol
-	client.conn.Write([]byte(fmt.Sprintf(":%s 265 %s :%s\r\n", "serverName", client.nickname, userList)))
+
+	channel := findChannel(channelName)
+	if channel == nil {
+		channel = &Channel{name: channelName, topic: "Welcome to " + channelName}
+		channels = append(channels, channel)
+	}
+	channel.clients = append(channel.clients, client)
+	client.channels = append(client.channels, channel)
+
+	for _, c := range channel.clients {
+		if c != client {
+			c.conn.Write([]byte(fmt.Sprintf(":%s JOIN %s\r\n", client.nickname, channel.name)))
+		}
+	}
+
+	var nicknames []string
+	for _, c := range channel.clients {
+		nicknames = append(nicknames, c.nickname)
+	}
+	nicknameList := strings.Join(nicknames, " ")
+	client.conn.Write([]byte(fmt.Sprintf(":%s 353 %s = %s :%s\r\n", "serverName", client.nickname, channel.name, nicknameList)))
+	client.conn.Write([]byte(fmt.Sprintf(":%s 366 %s %s End of /NAMES list.\r\n", "serverName", client.nickname, channel.name)))
+
+	client.conn.Write([]byte(fmt.Sprintf(":%s 331 %s %s No topic is set\r\n", "serverName", client.nickname, channel.name)))
+}
+
+func findClientByNickname(nickname string) *Client {
+	for _, client := range clients {
+		if client.nickname == nickname {
+			return &client
+		}
+	}
+	return nil
+}
+
+func findChannel(name string) *Channel {
+	for _, channel := range channels {
+		if channel.name == name {
+			return channel
+		}
+	}
+	return nil
+}
+
+func removeClient(client *Client) {
+	for i, c := range clients {
+		if c.conn == client.conn {
+			clients = append(clients[:i], clients[i+1:]...)
+			break
+		}
+	}
+	for _, channel := range client.channels {
+		removeClientFromChannel(channel, client)
+	}
+}
+
+func removeClientFromChannel(channel *Channel, client *Client) {
+	for i, c := range channel.clients {
+		if c.conn == client.conn {
+			channel.clients = append(channel.clients[:i], channel.clients[i+1:]...)
+			break
+		}
+	}
+}
+func sanitizeString(input string) string {
+	var sb strings.Builder
+	for _, r := range input {
+		if r != ' ' && unicode.IsPrint(r) {
+			sb.WriteRune(r)
+		}
+	}
+	return sb.String()
 }
