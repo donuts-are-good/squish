@@ -55,28 +55,31 @@ func handleConnection(conn net.Conn) {
 	client := Client{conn: conn, nickname: ""}
 	reader := bufio.NewReader(conn)
 
-	pingTicker := time.NewTicker(5 * time.Minute)
+	pingTicker := time.NewTicker(1 * time.Minute)
 	defer pingTicker.Stop()
-
-	timeout := time.NewTimer(10 * time.Minute)
-	defer timeout.Stop()
 
 	for {
 		select {
 		case <-pingTicker.C:
 			conn.Write([]byte(fmt.Sprintf("PING :%s\r\n", "serverName")))
 
-		case <-timeout.C:
-			log.Println("con: timeout:", conn.RemoteAddr().String())
-			removeClient(&client)
-			return
-
 		default:
 			message, err := reader.ReadString('\n')
 			if err != nil {
-				log.Println("con: disconnect:", conn.RemoteAddr().String())
-				removeClient(&client)
-				return
+				switch e := err.(type) {
+				case net.Error:
+					if e.Timeout() {
+						log.Println("con: timeout:", conn.RemoteAddr().String())
+					} else {
+						log.Println("con: disconnect:", conn.RemoteAddr().String())
+					}
+					removeClient(&client)
+					return
+				default:
+					log.Println("con: disconnect:", conn.RemoteAddr().String())
+					removeClient(&client)
+					return
+				}
 			} else {
 				log.Println("msg:", message, conn.RemoteAddr().String())
 			}
@@ -88,17 +91,24 @@ func handleConnection(conn net.Conn) {
 				command, params := parts[0], parts[1]
 				switch command {
 				case "PING":
-					timeout.Reset(10 * time.Minute)
 					conn.Write([]byte(fmt.Sprintf("PONG %s\r\n", params)))
 				case "PONG":
-					timeout.Reset(10 * time.Minute)
+
+					conn.SetReadDeadline(time.Now().Add(3 * time.Minute))
 				case "NICK":
 					log.Println("command: nick")
 					sanitizedNickname := sanitizeString(params)
 					handleNick(&client, sanitizedNickname, conn)
-				case "USERS":
-					log.Println("command: users")
-					handleUsers(&client)
+				case "NAMES":
+					log.Println("command: names")
+					targetAndChannel := strings.SplitN(params, " ", 2)
+					log.Println("targetAndChannel:", targetAndChannel)
+					var channelName string
+					if len(targetAndChannel) > 1 {
+						channelName = sanitizeString(targetAndChannel[1])
+					}
+					handleNames(&client, channelName)
+
 				case "JOIN":
 					log.Println("command: join")
 					sanitizedChannelName := sanitizeString(params)
@@ -113,6 +123,7 @@ func handleConnection(conn net.Conn) {
 						target, message := targetAndMessage[0], targetAndMessage[1]
 						handlePrivmsg(&client, target, message)
 					}
+					conn.SetReadDeadline(time.Now().Add(3 * time.Minute))
 				}
 			}
 		}
@@ -157,18 +168,34 @@ func handleList(client *Client) {
 	}
 }
 
-func handleUsers(client *Client) {
-	log.Println("listusers: starting")
+func handleNames(client *Client, channelName string) {
+	log.Println("handleUsers: starting")
 	var users []string
-	for _, c := range clients {
-		log.Println("listusers: client:", c.nickname)
-		users = append(users, c.nickname)
+
+	if channelName == "" {
+		for _, c := range clients {
+			users = append(users, c.nickname)
+		}
+	} else {
+		channel := findChannel(channelName)
+		if channel != nil {
+			for _, c := range channel.clients {
+				users = append(users, c.nickname)
+			}
+		} else {
+			client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s No such channel\r\n", "serverName", client.nickname, channelName)))
+			return
+		}
 	}
-	log.Println("listusers: writing:", users)
 
 	userList := strings.Join(users, " ")
 
-	client.conn.Write([]byte(fmt.Sprintf(":%s 265 %s %s\r\n", "serverName", client.nickname, userList)))
+	if channelName == "" {
+		client.conn.Write([]byte(fmt.Sprintf(":%s 265 %s %s\r\n", "serverName", client.nickname, userList)))
+	} else {
+		client.conn.Write([]byte(fmt.Sprintf(":%s 353 %s = %s :%s\r\n", "serverName", client.nickname, channelName, userList)))
+		client.conn.Write([]byte(fmt.Sprintf(":%s 366 %s %s End of /NAMES list.\r\n", "serverName", client.nickname, channelName)))
+	}
 }
 
 func handleNick(client *Client, nickname string, conn net.Conn) {
