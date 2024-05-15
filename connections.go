@@ -25,7 +25,7 @@ func handleConnection(conn net.Conn) {
 	for {
 		select {
 		case <-pingTicker.C:
-			conn.Write([]byte(fmt.Sprintf("PING :%s\r\n", "serverName")))
+			conn.Write([]byte(fmt.Sprintf("PING :%s\r\n", ServerNameString)))
 
 		default:
 			message, err := reader.ReadString('\n')

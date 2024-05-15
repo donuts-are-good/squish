@@ -35,7 +35,7 @@ func handlePrivmsg(client *Client, target string, message string) {
 		if targetClient != nil {
 			targetClient.conn.Write([]byte(fmt.Sprintf(":%s PRIVMSG %s %s\r\n", client.nickname, target, message)))
 		} else {
-			client.conn.Write([]byte(fmt.Sprintf(":%s 401 %s No such nick/channel\r\n", "serverName", target)))
+			client.conn.Write([]byte(fmt.Sprintf(":%s 401 %s No such nick/channel\r\n", ServerNameString, target)))
 		}
 	}
 }
@@ -46,7 +46,7 @@ func handleList(client *Client) {
 	defer mu.Unlock()
 	for _, channel := range channels {
 		userCount := len(channel.clients)
-		client.conn.Write([]byte(fmt.Sprintf(":%s 322 %s %s %d %s\r\n", "serverName", client.nickname, channel.name, userCount, channel.topic)))
+		client.conn.Write([]byte(fmt.Sprintf(":%s 322 %s %s %d %s\r\n", ServerNameString, client.nickname, channel.name, userCount, channel.topic)))
 	}
 }
 
@@ -68,7 +68,7 @@ func handleNames(client *Client, channelName string) {
 				users = append(users, c.nickname)
 			}
 		} else {
-			client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s No such channel\r\n", "serverName", client.nickname, channelName)))
+			client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s No such channel\r\n", ServerNameString, client.nickname, channelName)))
 			return
 		}
 	}
@@ -76,10 +76,10 @@ func handleNames(client *Client, channelName string) {
 	userList := strings.Join(users, " ")
 
 	if channelName == "" {
-		client.conn.Write([]byte(fmt.Sprintf(":%s 265 %s %s\r\n", "serverName", client.nickname, userList)))
+		client.conn.Write([]byte(fmt.Sprintf(":%s 265 %s %s\r\n", ServerNameString, client.nickname, userList)))
 	} else {
-		client.conn.Write([]byte(fmt.Sprintf(":%s 353 %s = %s :%s\r\n", "serverName", client.nickname, channelName, userList)))
-		client.conn.Write([]byte(fmt.Sprintf(":%s 366 %s %s End of /NAMES list.\r\n", "serverName", client.nickname, channelName)))
+		client.conn.Write([]byte(fmt.Sprintf(":%s 353 %s = %s :%s\r\n", ServerNameString, client.nickname, channelName, userList)))
+		client.conn.Write([]byte(fmt.Sprintf(":%s 366 %s %s End of /NAMES list.\r\n", ServerNameString, client.nickname, channelName)))
 	}
 }
 
@@ -158,9 +158,9 @@ func handleJoin(client *Client, channelName string) {
 		nicknames = append(nicknames, c.nickname)
 	}
 	nicknameList := strings.Join(nicknames, " ")
-	client.conn.Write([]byte(fmt.Sprintf(":%s 353 %s = %s :%s\r\n", "serverName", client.nickname, channel.name, nicknameList)))
-	client.conn.Write([]byte(fmt.Sprintf(":%s 366 %s %s End of /NAMES list.\r\n", "serverName", client.nickname, channel.name)))
-	client.conn.Write([]byte(fmt.Sprintf(":%s 331 %s %s No topic is set\r\n", "serverName", client.nickname, channel.name)))
+	client.conn.Write([]byte(fmt.Sprintf(":%s 353 %s = %s :%s\r\n", ServerNameString, client.nickname, channel.name, nicknameList)))
+	client.conn.Write([]byte(fmt.Sprintf(":%s 366 %s %s End of /NAMES list.\r\n", ServerNameString, client.nickname, channel.name)))
+	client.conn.Write([]byte(fmt.Sprintf(":%s 331 %s %s No topic is set\r\n", ServerNameString, client.nickname, channel.name)))
 }
 
 func handleCap(client *Client, params string) {
@@ -169,11 +169,41 @@ func handleCap(client *Client, params string) {
 		subCommand := parts[0]
 		switch subCommand {
 		case "LS":
-			client.conn.Write([]byte("CAP * LS :\r\n"))
+			// Check if the client requested a specific CAP version
+			if len(parts) > 1 && strings.HasPrefix(parts[1], "302") {
+				client.conn.Write([]byte("CAP * LS * :multi-prefix\r\n"))
+			} else {
+				client.conn.Write([]byte("CAP * LS :multi-prefix\r\n"))
+			}
 		case "REQ":
-			client.conn.Write([]byte("CAP * NAK :\r\n"))
+			// Respond to capability requests. We support multi-prefix.
+			requestedCaps := strings.Split(parts[1], " ")
+			unsupportedCaps := make([]string, 0)
+			for _, cap := range requestedCaps {
+				if cap != "multi-prefix" {
+					unsupportedCaps = append(unsupportedCaps, cap)
+				}
+			}
+			if len(unsupportedCaps) > 0 {
+				client.conn.Write([]byte(fmt.Sprintf("CAP * NAK :%s\r\n", strings.Join(unsupportedCaps, " "))))
+			} else {
+				client.conn.Write([]byte(fmt.Sprintf("CAP * ACK :%s\r\n", parts[1])))
+			}
 		case "END":
+			// End of CAP negotiation.
 			client.conn.Write([]byte("CAP * END\r\n"))
+		case "LIST":
+			// List the capabilities currently enabled for the client. Since we support multi-prefix, respond with it.
+			client.conn.Write([]byte("CAP * LIST :multi-prefix\r\n"))
+		case "CLEAR":
+			// Clear all capabilities. Since we support multi-prefix, just acknowledge the command.
+			client.conn.Write([]byte("CAP * CLEAR :\r\n"))
+		default:
+			// Unknown subcommand, respond with an error.
+			client.conn.Write([]byte(fmt.Sprintf(":%s 410 %s :Invalid CAP subcommand\r\n", ServerNameString, client.nickname)))
 		}
+	} else {
+		// If no subcommand is provided, respond with an error.
+		client.conn.Write([]byte(fmt.Sprintf(":%s 410 %s :Invalid CAP command\r\n", ServerNameString, client.nickname)))
 	}
 }
