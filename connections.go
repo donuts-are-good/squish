@@ -135,10 +135,16 @@ func commandParser(client *Client, command, params string) bool {
 		if len(targetAndMessage) > 1 {
 			target, message := targetAndMessage[0], targetAndMessage[1]
 			if strings.EqualFold(target, "NickServ") {
+				log.Printf("NickServ command received from %s: %s", client.Nickname, message)
 				handleNickServMessage(client, strings.TrimPrefix(message, ":"))
+				// Send an acknowledgment to the client
+				client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :NickServ command processed\r\n", ServerNameString, client.Nickname)))
 			} else {
 				handlePrivmsg(client, target, message)
 			}
+		} else {
+			log.Printf("Invalid PRIVMSG format from %s: %s", client.Nickname, params)
+			client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :Invalid PRIVMSG format\r\n", ServerNameString, client.Nickname)))
 		}
 	case "MODE":
 		log.Println("command: mode")

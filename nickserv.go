@@ -97,35 +97,41 @@ func handleNickServRegister(client *Client, args []string) {
 }
 
 func handleNickServIdentify(client *Client, args []string) {
+	log.Printf("NickServ: Handling IDENTIFY command for %s", client.Nickname)
 	if len(args) < 1 {
+		log.Printf("NickServ: Not enough parameters for IDENTIFY from %s", client.Nickname)
 		client.sendNumeric(ERR_NEEDMOREPARAMS, "IDENTIFY", "Not enough parameters")
 		return
 	}
 
 	password := args[0]
+	log.Printf("NickServ: Attempting to identify %s", client.Nickname)
 
 	existingClient, err := getClientByNickname(client.Nickname)
 	if err != nil {
 		if err == sql.ErrNoRows {
+			log.Printf("NickServ: Nickname %s is not registered", client.Nickname)
 			client.sendNumeric(ERR_NOSUCHNICK, client.Nickname, "This nickname is not registered")
 		} else {
-			log.Printf("Error fetching client from database: %v", err)
+			log.Printf("NickServ: Error fetching client from database: %v", err)
 			client.sendNumeric(ERR_UNKNOWNERROR, "Error identifying nickname")
 		}
 		return
 	}
 
 	if verifyPassword(existingClient.Password, password) {
+		log.Printf("NickServ: Password verified for %s", client.Nickname)
 		client.IsIdentified = true
 		client.LastSeen = time.Now()
 		err = updateClientInfo(client)
 		if err != nil {
-			log.Printf("Error updating client info: %v", err)
+			log.Printf("NickServ: Error updating client info for %s: %v", client.Nickname, err)
 			client.sendNumeric(ERR_UNKNOWNERROR, "Error updating client information")
 			return
 		}
 		client.sendNumeric(RPL_NOTICE, "NickServ", fmt.Sprintf("You are now identified for %s", client.Nickname))
 	} else {
+		log.Printf("NickServ: Invalid password for %s", client.Nickname)
 		client.sendNumeric(ERR_PASSWDMISMATCH, "Invalid password for nickname")
 	}
 }
