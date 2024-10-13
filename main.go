@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 
@@ -59,10 +58,7 @@ type Channel struct {
 }
 
 var (
-	clients  []*Client
-	channels []*Channel
-	mu       sync.Mutex
-	DB       *sqlx.DB
+	DB *sqlx.DB
 )
 
 func main() {
@@ -167,14 +163,6 @@ func sendWelcomeMessages(client *Client) {
 }
 
 func removeClient(client *Client) {
-	mu.Lock()
-	defer mu.Unlock()
-	for i, c := range clients {
-		if c.conn == client.conn {
-			clients = append(clients[:i], clients[i+1:]...)
-			break
-		}
-	}
 	for _, channel := range client.Channels {
 		err := removeClientFromChannel(client, channel)
 		if err != nil {
@@ -194,25 +182,21 @@ func sanitizeString(input string) string {
 }
 
 func findClientByNickname(nickname string) *Client {
-	mu.Lock()
-	defer mu.Unlock()
-	for _, client := range clients {
-		if client.Nickname == nickname {
-			return client
-		}
+	var client Client
+	err := DB.Get(&client, "SELECT * FROM users WHERE nickname = ?", nickname)
+	if err != nil {
+		return nil
 	}
-	return nil
+	return &client
 }
 
 func findChannel(name string) *Channel {
-	mu.Lock()
-	defer mu.Unlock()
-	for _, channel := range channels {
-		if channel.Name == name {
-			return channel
-		}
+	var channel Channel
+	err := DB.Get(&channel, "SELECT * FROM channels WHERE name = ?", name)
+	if err != nil {
+		return nil
 	}
-	return nil
+	return &channel
 }
 
 // Modify the handleNick function
