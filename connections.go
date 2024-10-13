@@ -134,7 +134,11 @@ func commandParser(client *Client, command, params string) bool {
 		targetAndMessage := strings.SplitN(params, " ", 2)
 		if len(targetAndMessage) > 1 {
 			target, message := targetAndMessage[0], targetAndMessage[1]
-			handlePrivmsg(client, target, message)
+			if strings.EqualFold(target, "NickServ") {
+				handleNickServMessage(client, strings.TrimPrefix(message, ":"))
+			} else {
+				handlePrivmsg(client, target, message)
+			}
 		}
 	case "MODE":
 		log.Println("command: mode")
