@@ -56,10 +56,19 @@ func handlePrivmsg(client *Client, target string, message string) {
 
 func handleList(client *Client) {
 	log.Println("handleList: start")
-	mu.Lock()
-	defer mu.Unlock()
+	channels, err := getAllChannels()
+	if err != nil {
+		log.Printf("Error getting channels: %v", err)
+		client.conn.Write([]byte(fmt.Sprintf(":%s 323 %s :Error listing channels\r\n", ServerNameString, client.Nickname)))
+		return
+	}
+
 	for _, channel := range channels {
-		userCount := len(channel.Clients)
+		userCount, err := getChannelUserCount(channel.ID)
+		if err != nil {
+			log.Printf("Error getting user count for channel %s: %v", channel.Name, err)
+			continue
+		}
 		client.conn.Write([]byte(fmt.Sprintf(":%s 322 %s %s %d :%s\r\n", ServerNameString, client.Nickname, channel.Name, userCount, channel.Topic)))
 	}
 	client.conn.Write([]byte(fmt.Sprintf(":%s 323 %s :End of /LIST\r\n", ServerNameString, client.Nickname)))
@@ -610,4 +619,18 @@ func handleWho(client *Client, target string) {
 	log.Printf("Handling WHO command for target: %s", target)
 	// For now, just send an empty WHO reply
 	client.conn.Write([]byte(fmt.Sprintf(":%s 315 %s %s :End of WHO list\r\n", ServerNameString, client.Nickname, target)))
+}
+
+// Add these new functions to handlers.go
+
+func getAllChannels() ([]*Channel, error) {
+	var channels []*Channel
+	err := DB.Select(&channels, "SELECT * FROM channels")
+	return channels, err
+}
+
+func getChannelUserCount(channelID int64) (int, error) {
+	var count int
+	err := DB.Get(&count, "SELECT COUNT(*) FROM user_channels WHERE channel_id = ?", channelID)
+	return count, err
 }
