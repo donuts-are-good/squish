@@ -238,33 +238,10 @@ func handleNick(client *Client, nickname string) {
 			return
 		}
 
-		// Give the client time to identify
-		client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :This nickname is registered. Please identify via /msg NickServ IDENTIFY <password>\r\n", ServerNameString, nickname)))
-
-		oldNickname := client.Nickname
-		client.Nickname = nickname
-
-		// Notify the client and other users about the nickname change
-		client.conn.Write([]byte(fmt.Sprintf(":%s NICK %s\r\n", oldNickname, nickname)))
-		notifyNicknameChange(client, oldNickname, nickname)
-
-		// Start a goroutine to handle the timeout
-		go func() {
-			time.Sleep(NickAuthTimeout)
-			if !client.IsIdentified {
-				// Client didn't identify in time, revert to old nickname or generate a new one
-				newNickname := oldNickname
-				if newNickname == "" || isNicknameInUse(newNickname) {
-					newNickname = generateUniqueNickname(nickname)
-				}
-				handleNick(client, newNickname)
-			}
-		}()
-
-		return
+		// Inform the client that the nickname is registered
+		client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :This nickname is registered. You can identify via /msg NickServ IDENTIFY <password>\r\n", ServerNameString, nickname)))
 	}
 
-	// Nickname is not registered or in use
 	oldNickname := client.Nickname
 	client.Nickname = nickname
 
