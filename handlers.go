@@ -310,7 +310,7 @@ func completeRegistration(client *Client) {
 	sendWelcomeMessages(client)
 
 	// Send the password and instructions to the user
-	client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :Your account has been registered with the password: %s\r\n", ServerNameString, client.Nickname, password)))
+	client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :Your account username: '%s' nickname: '%s' has been registered with the password: %s\r\n", ServerNameString, client.Nickname, client.Username, client.Nickname, password)))
 	client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :To change your password, use the command: /msg NickServ SET PASSWORD <new_password>\r\n", ServerNameString, client.Nickname)))
 }
 
