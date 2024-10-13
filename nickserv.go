@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"strings"
@@ -34,7 +35,11 @@ func handleNickServMessage(client *Client, message string) {
 	case "IDENTIFY":
 		handleNickServIdentify(client, parts[1:])
 	case "SET":
-		handleNickServSet(client, parts[1:])
+		if len(parts) > 1 && strings.ToUpper(parts[1]) == "PASSWORD" {
+			handleNickServSetPassword(client, parts[2:])
+		} else {
+			sendNickServHelp(client)
+		}
 	case "INFO":
 		handleNickServInfo(client, parts[1:])
 	case "GHOST":
@@ -78,10 +83,9 @@ func handleNickServRegister(client *Client, args []string) {
 
 	// Create the client in the database
 	client.Password = string(hashedPassword)
+	client.Email = email
 	client.CreatedAt = time.Now()
 	client.LastSeen = time.Now()
-	// Add the email to the client struct
-	client.Email = email
 	err = createClient(client)
 	if err != nil {
 		log.Printf("Error creating client: %v", err)
@@ -102,7 +106,12 @@ func handleNickServIdentify(client *Client, args []string) {
 
 	existingClient, err := getClientByNickname(client.Nickname)
 	if err != nil {
-		client.sendNumeric(ERR_NOSUCHNICK, client.Nickname, "This nickname is not registered")
+		if err == sql.ErrNoRows {
+			client.sendNumeric(ERR_NOSUCHNICK, client.Nickname, "This nickname is not registered")
+		} else {
+			log.Printf("Error fetching client from database: %v", err)
+			client.sendNumeric(ERR_UNKNOWNERROR, "Error identifying nickname")
+		}
 		return
 	}
 
@@ -112,6 +121,8 @@ func handleNickServIdentify(client *Client, args []string) {
 		err = updateClientInfo(client)
 		if err != nil {
 			log.Printf("Error updating client info: %v", err)
+			client.sendNumeric(ERR_UNKNOWNERROR, "Error updating client information")
+			return
 		}
 		client.sendNumeric(RPL_NOTICE, "NickServ", fmt.Sprintf("You are now identified for %s", client.Nickname))
 	} else {
@@ -119,9 +130,9 @@ func handleNickServIdentify(client *Client, args []string) {
 	}
 }
 
-func handleNickServSet(client *Client, args []string) {
-	if len(args) < 2 || strings.ToUpper(args[0]) != "PASSWORD" {
-		client.sendNumeric(ERR_NEEDMOREPARAMS, "SET", "Invalid SET command. Use SET PASSWORD <new_password>")
+func handleNickServSetPassword(client *Client, args []string) {
+	if len(args) < 1 {
+		client.sendNumeric(ERR_NEEDMOREPARAMS, "SET PASSWORD", "Not enough parameters")
 		return
 	}
 
@@ -130,7 +141,7 @@ func handleNickServSet(client *Client, args []string) {
 		return
 	}
 
-	newPassword := args[1]
+	newPassword := args[0]
 
 	// Hash the new password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
@@ -141,14 +152,14 @@ func handleNickServSet(client *Client, args []string) {
 	}
 
 	// Update the password in the database
-	client.Password = string(hashedPassword)
-	err = updateClientInfo(client)
+	_, err = DB.Exec("UPDATE users SET password = ? WHERE nickname = ?", string(hashedPassword), client.Nickname)
 	if err != nil {
 		log.Printf("Error updating client password: %v", err)
 		client.sendNumeric(ERR_UNKNOWNERROR, "Error changing password")
 		return
 	}
 
+	client.Password = string(hashedPassword)
 	client.sendNumeric(RPL_NOTICE, "NickServ", "Password changed successfully")
 }
 
@@ -168,6 +179,7 @@ func handleNickServInfo(client *Client, args []string) {
 	client.sendNumeric(RPL_NOTICE, "NickServ", fmt.Sprintf("Information for %s:", targetNick))
 	client.sendNumeric(RPL_NOTICE, "NickServ", fmt.Sprintf("Registered on: %s", targetClient.CreatedAt.Format(time.RFC1123)))
 	client.sendNumeric(RPL_NOTICE, "NickServ", fmt.Sprintf("Last seen: %s", targetClient.LastSeen.Format(time.RFC1123)))
+	client.sendNumeric(RPL_NOTICE, "NickServ", fmt.Sprintf("Email: %s", targetClient.Email))
 }
 
 func handleNickServGhost(client *Client, args []string) {
@@ -206,17 +218,7 @@ func (client *Client) sendNumeric(numeric string, params ...string) {
 	client.conn.Write([]byte(message))
 }
 
-// Note: These functions are already defined in main.go, so we don't need to redefine them here.
-// They are left as comments for reference.
-
-// func createClient(client *Client) error {
-// 	// Implementation in main.go
-// }
-
-// func updateClientInfo(client *Client) error {
-// 	// Implementation in main.go
-// }
-
-// func verifyPassword(hashedPassword, password string) bool {
-// 	// Implementation in main.go
-// }
+func verifyPassword(hashedPassword, password string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
+	return err == nil
+}
