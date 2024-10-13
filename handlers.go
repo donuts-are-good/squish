@@ -287,23 +287,6 @@ func completeRegistration(client *Client) {
 	client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :To change your password, use the command: /msg NickServ SET PASSWORD <new_password>\r\n", ServerNameString, client.Nickname)))
 }
 
-func createOrUpdateClient(client *Client, password string) error {
-	var err error
-	existingClient, err := getClientByNickname(client.Nickname)
-	if err == sql.ErrNoRows {
-		// New client, create a new database entry
-		err = createClient(client)
-	} else if err == nil {
-		// Existing client, update the database entry
-		client.ID = existingClient.ID
-		client.Password = password // Add this line
-		err = updateClientInfo(client)
-	} else {
-		return err
-	}
-	return err
-}
-
 func generateRandomPassword(length int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
 	seededRand := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -583,18 +566,4 @@ func handleWho(client *Client, target string) {
 	log.Printf("Handling WHO command for target: %s", target)
 	// For now, just send an empty WHO reply
 	client.conn.Write([]byte(fmt.Sprintf(":%s 315 %s %s :End of WHO list\r\n", ServerNameString, client.Nickname, target)))
-}
-
-// Add these new functions to handlers.go
-
-func getAllChannels() ([]*Channel, error) {
-	var channels []*Channel
-	err := DB.Select(&channels, "SELECT * FROM channels")
-	return channels, err
-}
-
-func getChannelUserCount(channelID int64) (int, error) {
-	var count int
-	err := DB.Get(&count, "SELECT COUNT(*) FROM user_channels WHERE channel_id = ?", channelID)
-	return count, err
 }
