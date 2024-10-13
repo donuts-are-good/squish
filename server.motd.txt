@@ -2,13 +2,24 @@ Welcome to SQUISH IRC SERVER
 sweet.yachts
 
 Supported commands:
-/nick     - Change your nickname
-/join     - Join a channel
-/part     - Leave a channel
-/quit     - Disconnect from the server
-/list     - List available channels
-/names    - List users in a channel
-/privmsg  - Send a private message
-/topic    - View or set a channel topic
-/mode     - Set user or channel modes
-/motd     - View this message of the day
+1. NICK <nickname>     - Set or change your nickname
+2. USER <username> * * :<realname>  - Set your username and real name
+3. JOIN #<channel>     - Join a channel (e.g., JOIN #general)
+4. PART #<channel>     - Leave a channel
+5. PRIVMSG <target> :<message>  - Send a message to a channel or user
+6. LIST                - List all channels
+7. NAMES #<channel>    - List users in a channel
+8. TOPIC #<channel> :<topic>  - Set or view channel topic
+9. MODE <target> <modes>  - Set user or channel modes
+10. QUIT :<message>    - Disconnect from the server
+
+NickServ commands (use /msg NickServ <command>):
+- REGISTER <password> <email>  - Register your nickname
+- IDENTIFY <password>  - Identify with your registered nickname
+- SET PASSWORD <new_password>  - Change your password
+- INFO <nickname>      - Get information about a nickname
+- GHOST <nickname> <password>  - Disconnect an old session
+
+Default channels: #general, #help, #off-topic
+
+Enjoy your stay and happy chatting!
