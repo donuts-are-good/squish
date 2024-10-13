@@ -1,0 +1,14 @@
+Welcome to SQUISH IRC SERVER
+sweet.yachts
+
+Supported commands:
+/nick     - Change your nickname
+/join     - Join a channel
+/part     - Leave a channel
+/quit     - Disconnect from the server
+/list     - List available channels
+/names    - List users in a channel
+/privmsg  - Send a private message
+/topic    - View or set a channel topic
+/mode     - Set user or channel modes
+/motd     - View this message of the day
