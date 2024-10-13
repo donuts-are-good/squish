@@ -21,10 +21,6 @@ func handleConnection(conn net.Conn) {
 	client := &Client{conn: conn, Nickname: ""}
 	reader := bufio.NewReader(conn)
 
-	mu.Lock()
-	clients = append(clients, client)
-	mu.Unlock()
-
 	log.Printf("New connection from %s", conn.RemoteAddr().String())
 
 	// Send a preliminary welcome message
@@ -173,4 +169,33 @@ func commandParser(client *Client, command, params string) bool {
 		client.conn.Write([]byte(fmt.Sprintf(":%s 421 %s %s :Unknown command\r\n", ServerNameString, client.Nickname, command)))
 	}
 	return false
+}
+
+func handleDisconnect(client *Client, err error) {
+	var quitMessage string
+	switch e := err.(type) {
+	case net.Error:
+		if e.Timeout() {
+			quitMessage = "Ping timeout"
+			log.Println("con: timeout:", client.conn.RemoteAddr().String())
+		} else {
+			quitMessage = "Connection error"
+			log.Println("con: disconnect:", client.conn.RemoteAddr().String())
+		}
+	default:
+		quitMessage = "Client quit"
+		log.Println("con: disconnect:", client.conn.RemoteAddr().String())
+	}
+
+	handleQuit(client, quitMessage)
+	// Remove client from all channels in the database
+	_, err = DB.Exec("DELETE FROM user_channels WHERE user_id = ?", client.ID)
+	if err != nil {
+		log.Printf("Error removing client from channels: %v", err)
+	}
+	// Update last_seen in the database
+	_, err = DB.Exec("UPDATE users SET last_seen = ? WHERE id = ?", time.Now(), client.ID)
+	if err != nil {
+		log.Printf("Error updating last_seen for client: %v", err)
+	}
 }

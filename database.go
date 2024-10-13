@@ -154,14 +154,6 @@ func addClientToChannel(client *Client, channel *Channel) error {
 }
 
 func removeClientFromChannel(client *Client, channel *Channel) error {
-	// Remove from in-memory structure
-	for i, c := range channel.Clients {
-		if c.conn == client.conn {
-			channel.Clients = append(channel.Clients[:i], channel.Clients[i+1:]...)
-			break
-		}
-	}
-
 	// Remove from database
 	_, err := DB.Exec(`
 		DELETE FROM user_channels
@@ -190,29 +182,6 @@ func getClientsInChannel(channel *Channel) ([]*Client, error) {
 		WHERE uc.channel_id = ?
 	`, channel.ID)
 	return clients, err
-}
-
-func syncInMemoryState() {
-	mu.Lock()
-	defer mu.Unlock()
-
-	for _, client := range clients {
-		channels, err := getChannelsForClient(client)
-		if err != nil {
-			log.Printf("Error syncing channels for client %s: %v", client.Nickname, err)
-		} else {
-			client.Channels = channels
-		}
-	}
-
-	for _, channel := range channels {
-		clients, err := getClientsInChannel(channel)
-		if err != nil {
-			log.Printf("Error syncing clients for channel %s: %v", channel.Name, err)
-		} else {
-			channel.Clients = clients
-		}
-	}
 }
 
 func getAllChannels() ([]*Channel, error) {

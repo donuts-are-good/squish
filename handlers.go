@@ -5,33 +5,12 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
-	"net"
 	"strconv"
 	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
-
-func handleDisconnect(client *Client, err error) {
-	var quitMessage string
-	switch e := err.(type) {
-	case net.Error:
-		if e.Timeout() {
-			quitMessage = "Ping timeout"
-			log.Println("con: timeout:", client.conn.RemoteAddr().String())
-		} else {
-			quitMessage = "Connection error"
-			log.Println("con: disconnect:", client.conn.RemoteAddr().String())
-		}
-	default:
-		quitMessage = "Client quit"
-		log.Println("con: disconnect:", client.conn.RemoteAddr().String())
-	}
-
-	handleQuit(client, quitMessage)
-	removeClient(client)
-}
 
 func handlePrivmsg(client *Client, target string, message string) {
 	if strings.EqualFold(target, "NickServ") {
@@ -80,21 +59,31 @@ func handleNames(client *Client, channelName string) {
 	log.Println("handleUsers: starting")
 	var users []string
 
-	mu.Lock()
-	defer mu.Unlock()
-
 	if channelName == "" {
-		for _, c := range clients {
-			users = append(users, c.Nickname)
+		// Get all users from the database
+		err := DB.Select(&users, "SELECT nickname FROM users")
+		if err != nil {
+			log.Printf("Error getting all users: %v", err)
+			client.conn.Write([]byte(fmt.Sprintf(":%s 366 %s * :Error listing users\r\n", ServerNameString, client.Nickname)))
+			return
 		}
 	} else {
 		channel := findChannel(channelName)
 		if channel != nil {
-			for _, c := range channel.Clients {
-				users = append(users, c.Nickname)
+			// Get users in the channel from the database
+			err := DB.Select(&users, `
+				SELECT u.nickname 
+				FROM users u 
+				JOIN user_channels uc ON u.id = uc.user_id 
+				WHERE uc.channel_id = ?
+			`, channel.ID)
+			if err != nil {
+				log.Printf("Error getting users for channel %s: %v", channelName, err)
+				client.conn.Write([]byte(fmt.Sprintf(":%s 366 %s %s :Error listing users\r\n", ServerNameString, client.Nickname, channelName)))
+				return
 			}
 		} else {
-			client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s No such channel\r\n", ServerNameString, client.Nickname, channelName)))
+			client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :No such channel\r\n", ServerNameString, client.Nickname, channelName)))
 			return
 		}
 	}
@@ -105,7 +94,7 @@ func handleNames(client *Client, channelName string) {
 		client.conn.Write([]byte(fmt.Sprintf(":%s 265 %s %s\r\n", ServerNameString, client.Nickname, userList)))
 	} else {
 		client.conn.Write([]byte(fmt.Sprintf(":%s 353 %s = %s :%s\r\n", ServerNameString, client.Nickname, channelName, userList)))
-		client.conn.Write([]byte(fmt.Sprintf(":%s 366 %s %s End of /NAMES list.\r\n", ServerNameString, client.Nickname, channelName)))
+		client.conn.Write([]byte(fmt.Sprintf(":%s 366 %s %s :End of /NAMES list.\r\n", ServerNameString, client.Nickname, channelName)))
 	}
 }
 
@@ -128,19 +117,20 @@ func handleJoin(client *Client, channelName string) {
 		return
 	}
 
-	clients, err := getClientsInChannel(channel)
+	// Get all clients in the channel from the database
+	var channelClients []Client
+	err = DB.Select(&channelClients, `
+		SELECT u.* 
+		FROM users u 
+		JOIN user_channels uc ON u.id = uc.user_id 
+		WHERE uc.channel_id = ?
+	`, channel.ID)
 	if err != nil {
 		log.Printf("Error getting clients in channel: %v", err)
-	} else {
-		channel.Clients = clients
 	}
 
-	mu.Lock()
-	channel.Clients = append(channel.Clients, client)
-	client.Channels = append(client.Channels, channel)
-	mu.Unlock()
-
-	for _, c := range channel.Clients {
+	// Notify all clients in the channel about the new join
+	for _, c := range channelClients {
 		c.conn.Write([]byte(fmt.Sprintf(":%s JOIN %s\r\n", client.Nickname, channel.Name)))
 	}
 
@@ -153,7 +143,7 @@ func handleJoin(client *Client, channelName string) {
 
 	// Send names list
 	var nicknames []string
-	for _, c := range channel.Clients {
+	for _, c := range channelClients {
 		nicknames = append(nicknames, c.Nickname)
 	}
 	nicknameList := strings.Join(nicknames, " ")

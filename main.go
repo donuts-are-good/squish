@@ -95,12 +95,6 @@ func main() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
-	go func() {
-		for range ticker.C {
-			syncInMemoryState()
-		}
-	}()
-
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
