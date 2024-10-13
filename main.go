@@ -19,6 +19,12 @@ import (
 const ServerNameString = "SquishIRC"
 const ServerVersionString = "v0.1.1"
 
+// Add these constants at the top of the file
+const (
+	NickAuthTimeout = 30 * time.Second
+	NickSuffix      = "_"
+)
+
 var startTime = time.Now()
 
 type Client struct {
@@ -419,4 +425,109 @@ func syncInMemoryState() {
 			channel.Clients = clients
 		}
 	}
+}
+
+// Modify the handleNick function
+func handleNick(client *Client, nickname string) {
+	log.Printf("Handling NICK command for %s, new nickname: %s", client.conn.RemoteAddr().String(), nickname)
+	if len(nickname) > 50 {
+		log.Printf("Nickname too long: %s", nickname)
+		client.conn.Write([]byte(fmt.Sprintf(":%s 432 * %s :Erroneous nickname\r\n", ServerNameString, nickname)))
+		return
+	}
+
+	// Check if the nickname is already in use in the database
+	existingClient, err := getClientByNickname(nickname)
+	if err != nil && err != sql.ErrNoRows {
+		log.Printf("Error checking existing nickname: %v", err)
+		return
+	}
+
+	if err == nil && existingClient != nil {
+		// Nickname is registered
+		if client.IsIdentified && client.Nickname == nickname {
+			// Client is already identified for this nickname
+			return
+		}
+
+		// Give the client time to identify
+		client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :This nickname is registered. Please identify via /msg NickServ IDENTIFY <password>\r\n", ServerNameString, nickname)))
+
+		oldNickname := client.Nickname
+		client.Nickname = nickname
+
+		// Notify the client and other users about the nickname change
+		client.conn.Write([]byte(fmt.Sprintf(":%s NICK %s\r\n", oldNickname, nickname)))
+		notifyNicknameChange(client, oldNickname, nickname)
+
+		// Start a goroutine to handle the timeout
+		go func() {
+			time.Sleep(NickAuthTimeout)
+			if !client.IsIdentified {
+				// Client didn't identify in time, revert to old nickname or generate a new one
+				newNickname := oldNickname
+				if newNickname == "" || isNicknameInUse(newNickname) {
+					newNickname = generateUniqueNickname(nickname)
+				}
+				handleNick(client, newNickname)
+			}
+		}()
+
+		return
+	}
+
+	// Nickname is not registered or in use
+	oldNickname := client.Nickname
+	client.Nickname = nickname
+
+	// Update the nickname in the database if the client is already registered
+	if client.ID != 0 {
+		err = updateClientNickname(client)
+		if err != nil {
+			log.Printf("Error updating client nickname in database: %v", err)
+			client.Nickname = oldNickname
+			client.conn.Write([]byte(fmt.Sprintf(":%s 432 %s :Nickname change failed\r\n", ServerNameString, nickname)))
+			return
+		}
+	}
+
+	// Notify the client and other users about the nickname change
+	client.conn.Write([]byte(fmt.Sprintf(":%s NICK %s\r\n", oldNickname, nickname)))
+	notifyNicknameChange(client, oldNickname, nickname)
+
+	// Check if we have both NICK and USER info
+	if client.Username != "" && client.ID == 0 {
+		completeRegistration(client)
+	}
+}
+
+// Add this helper function
+func isNicknameInUse(nickname string) bool {
+	_, err := getClientByNickname(nickname)
+	return err == nil
+}
+
+func generateUniqueNickname(base string) string {
+	newNickname := base
+	suffix := 1
+	for isNicknameInUse(newNickname) {
+		newNickname = fmt.Sprintf("%s%d", base, suffix)
+		suffix++
+	}
+	return newNickname
+}
+
+func notifyNicknameChange(client *Client, oldNickname, newNickname string) {
+	for _, channel := range client.Channels {
+		for _, c := range channel.Clients {
+			if c != client {
+				c.conn.Write([]byte(fmt.Sprintf(":%s NICK %s\r\n", oldNickname, newNickname)))
+			}
+		}
+	}
+}
+
+func updateClientNickname(client *Client) error {
+	_, err := DB.Exec("UPDATE users SET nickname = ? WHERE id = ?", client.Nickname, client.ID)
+	return err
 }

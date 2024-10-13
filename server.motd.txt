@@ -1,3 +1,9 @@
+┏┓    • ┓ 
+┗┓┏┓┓┏┓┏┣┓ github.com/donuts-are-good/squish
+┗┛┗┫┗┻┗┛┛┗ v0.1.1
+   ┗   
+
+
 Welcome to SQUISH IRC SERVER
 sweet.yachts
 

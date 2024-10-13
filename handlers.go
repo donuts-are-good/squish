@@ -107,44 +107,6 @@ func handleNames(client *Client, channelName string) {
 	}
 }
 
-func handleNick(client *Client, nickname string) {
-	log.Printf("Handling NICK command for %s, new nickname: %s", client.conn.RemoteAddr().String(), nickname)
-	if len(nickname) > 50 {
-		log.Printf("Nickname too long: %s", nickname)
-		client.conn.Write([]byte(fmt.Sprintf(":%s 432 * %s :Erroneous nickname\r\n", ServerNameString, nickname)))
-		return
-	}
-
-	// Check if the nickname is already in use in the database
-	existingClient, err := getClientByNickname(nickname)
-	if err != nil && err != sql.ErrNoRows {
-		log.Printf("Error checking existing nickname: %v", err)
-	}
-	if err == nil && existingClient != nil {
-		log.Printf("Nickname already in use: %s", nickname)
-		client.conn.Write([]byte(fmt.Sprintf(":%s 433 * %s :Nickname is already in use\r\n", ServerNameString, nickname)))
-		return
-	}
-
-	oldNickname := client.Nickname
-	client.Nickname = nickname
-
-	_, err = client.conn.Write([]byte(fmt.Sprintf(":%s NICK %s\r\n", oldNickname, nickname)))
-	if err != nil {
-		log.Printf("Error sending NICK confirmation to %s: %v", client.conn.RemoteAddr().String(), err)
-	} else {
-		log.Printf("Sent NICK confirmation to %s", client.conn.RemoteAddr().String())
-	}
-
-	// Check if we have both NICK and USER info
-	if client.Username != "" {
-		completeRegistration(client)
-	} else {
-		// Send a message to guide the user
-		client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :Welcome! Please complete your registration using the USER command.\r\n", ServerNameString, client.Nickname)))
-	}
-}
-
 func handleJoin(client *Client, channelName string) {
 	if !strings.HasPrefix(channelName, "#") {
 		channelName = "#" + channelName
