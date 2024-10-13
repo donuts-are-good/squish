@@ -43,13 +43,15 @@ func handlePrivmsg(client *Client, target string, message string) {
 		channel := findChannel(target)
 		if channel != nil {
 			broadcastMessage(channel, client, message)
+		} else {
+			client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :No such channel\r\n", ServerNameString, client.Nickname, target)))
 		}
 	} else {
 		targetClient := findClientByNickname(target)
 		if targetClient != nil {
-			targetClient.conn.Write([]byte(fmt.Sprintf(":%s PRIVMSG %s %s\r\n", client.Nickname, target, message)))
+			targetClient.conn.Write([]byte(fmt.Sprintf(":%s PRIVMSG %s :%s\r\n", client.Nickname, target, message)))
 		} else {
-			client.conn.Write([]byte(fmt.Sprintf(":%s 401 %s No such nick/channel\r\n", ServerNameString, target)))
+			client.conn.Write([]byte(fmt.Sprintf(":%s 401 %s %s :No such nick/channel\r\n", ServerNameString, client.Nickname, target)))
 		}
 	}
 }

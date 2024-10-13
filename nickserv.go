@@ -22,23 +22,23 @@ const (
 
 func handleNickServMessage(client *Client, message string) {
 	parts := strings.Fields(message)
-	if len(parts) < 2 {
+	if len(parts) < 1 {
 		sendNickServHelp(client)
 		return
 	}
 
-	command := strings.ToUpper(parts[1])
+	command := strings.ToUpper(parts[0])
 	switch command {
 	case "REGISTER":
-		handleNickServRegister(client, parts[2:])
+		handleNickServRegister(client, parts[1:])
 	case "IDENTIFY":
-		handleNickServIdentify(client, parts[2:])
+		handleNickServIdentify(client, parts[1:])
 	case "SET":
-		handleNickServSet(client, parts[2:])
+		handleNickServSet(client, parts[1:])
 	case "INFO":
-		handleNickServInfo(client, parts[2:])
+		handleNickServInfo(client, parts[1:])
 	case "GHOST":
-		handleNickServGhost(client, parts[2:])
+		handleNickServGhost(client, parts[1:])
 	default:
 		sendNickServHelp(client)
 	}
