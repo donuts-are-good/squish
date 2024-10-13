@@ -4,8 +4,10 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"math/rand"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -202,22 +204,21 @@ func handleNick(client *Client, nickname string) {
 		return
 	}
 
-	// Check if the nickname is already in use in the database
-	existingClient, err := getClientByNickname(nickname)
-	if err != nil && err != sql.ErrNoRows {
-		log.Printf("Error checking existing nickname: %v", err)
-		return
-	}
-
-	if err == nil && existingClient != nil {
-		// Nickname is registered
+	// Check if the nickname is already in use
+	if isNicknameInUse(nickname) {
+		// Nickname is in use
 		if client.IsIdentified && client.Nickname == nickname {
 			// Client is already identified for this nickname
 			return
 		}
 
-		// Inform the client that the nickname is registered
-		client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :This nickname is registered. You can identify via /msg NickServ IDENTIFY <password>\r\n", ServerNameString, nickname)))
+		// Inform the client that the nickname is in use
+		client.conn.Write([]byte(fmt.Sprintf(":%s 433 * %s :Nickname is already in use\r\n", ServerNameString, nickname)))
+
+		// Generate a unique nickname
+		uniqueNickname := generateUniqueNickname(nickname)
+		client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE * :Your nickname has been changed to %s\r\n", ServerNameString, uniqueNickname)))
+		nickname = uniqueNickname
 	}
 
 	oldNickname := client.Nickname
@@ -225,7 +226,7 @@ func handleNick(client *Client, nickname string) {
 
 	// Update the nickname in the database if the client is already registered
 	if client.ID != 0 {
-		err = updateClientNickname(client)
+		err := updateClientNickname(client)
 		if err != nil {
 			log.Printf("Error updating client nickname in database: %v", err)
 			client.Nickname = oldNickname
@@ -252,10 +253,9 @@ func isNicknameInUse(nickname string) bool {
 
 func generateUniqueNickname(base string) string {
 	newNickname := base
-	suffix := 1
 	for isNicknameInUse(newNickname) {
-		newNickname = fmt.Sprintf("%s%d", base, suffix)
-		suffix++
+		randomSuffix := rand.Intn(8889) + 1111 // Generates a number between 1111 and 9999
+		newNickname = fmt.Sprintf("%s-%s", base, strconv.Itoa(randomSuffix))
 	}
 	return newNickname
 }
