@@ -147,8 +147,19 @@ func handleJoin(client *Client, channelNames string) {
 		}
 
 		if !isAlreadyInChannel {
+			// Check if the channel is new (no users yet)
+			userCount, err := getChannelUserCount(channel.ID)
+			if err != nil {
+				log.Printf("Error getting channel user count: %v", err)
+				client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :Failed to join channel\r\n", ServerNameString, client.Nickname, channelName)))
+				continue
+			}
+
+			// If the channel is new, add the client as an operator
+			isOperator := userCount == 0
+
 			// Add the client to the channel in the database
-			err = addClientToChannel(client, channel, false) // Always add as a regular user first
+			err = addClientToChannel(client, channel, isOperator)
 			if err != nil {
 				log.Printf("Error adding client %s to channel %s: %v", client.Nickname, channelName, err)
 				client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :Failed to join channel\r\n", ServerNameString, client.Nickname, channelName)))
@@ -168,6 +179,12 @@ func handleJoin(client *Client, channelNames string) {
 			// If this is a new channel, inform the user about registration
 			if !channel.IsRegistered {
 				client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :This channel is not registered. To register it, use /MSG ChanServ REGISTER %s\r\n", ServerNameString, client.Nickname, channelName)))
+			}
+
+			// If the client is now an operator, send them a notice
+			if isOperator {
+				client.conn.Write([]byte(fmt.Sprintf(":%s MODE %s +o %s\r\n", ServerNameString, channelName, client.Nickname)))
+				client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :You are now channel operator\r\n", ServerNameString, client.Nickname)))
 			}
 		}
 
