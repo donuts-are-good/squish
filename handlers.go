@@ -135,12 +135,11 @@ func handleJoin(client *Client, channelNames string) {
 		}
 
 		// Check if the client is already in the channel
-		isAlreadyInChannel := false
-		for _, ch := range client.Channels {
-			if ch.Name == channelName {
-				isAlreadyInChannel = true
-				break
-			}
+		isAlreadyInChannel, err := isClientInChannel(client, channel)
+		if err != nil {
+			log.Printf("Error checking if client is in channel: %v", err)
+			client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :Failed to join channel\r\n", ServerNameString, client.Nickname, channelName)))
+			continue
 		}
 
 		if !isAlreadyInChannel {
@@ -155,14 +154,8 @@ func handleJoin(client *Client, channelNames string) {
 			// Add the channel to the client's list of channels
 			client.Channels = append(client.Channels, channel)
 
-			// Add the client to the channel's list of clients
-			channel.Clients = append(channel.Clients, client)
-
-			// Send JOIN message to the client who is joining
+			// Send JOIN message to all clients in the channel, including the one who is joining
 			joinMessage := fmt.Sprintf(":%s!%s@%s JOIN %s\r\n", client.Nickname, client.Username, client.Hostname, channelName)
-			client.conn.Write([]byte(joinMessage))
-
-			// Send JOIN message to all other clients in the channel
 			broadcastToChannel(channel, joinMessage)
 
 			// If this is a new channel, inform the user about registration

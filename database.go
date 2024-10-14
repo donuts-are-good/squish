@@ -177,7 +177,7 @@ func removeClientFromChannel(client *Client, channel *Channel) error {
 func getClientsInChannel(channel *Channel) ([]*Client, error) {
 	var clients []*Client
 	err := DB.Select(&clients, `
-		SELECT u.*
+		SELECT u.id, u.nickname, u.username, u.hostname, u.realname, u.invisible, u.is_operator, u.has_voice, u.created_at, u.is_identified, u.last_seen, u.email
 		FROM users u
 		JOIN user_channels uc ON u.id = uc.user_id
 		WHERE uc.channel_id = ?
@@ -217,4 +217,13 @@ func createOrUpdateClient(client *Client, password string) error {
 		return err
 	}
 	return err
+}
+
+func isClientInChannel(client *Client, channel *Channel) (bool, error) {
+	var count int
+	err := DB.QueryRow("SELECT COUNT(*) FROM user_channels WHERE user_id = ? AND channel_id = ?", client.ID, channel.ID).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }

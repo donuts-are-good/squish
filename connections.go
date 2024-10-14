@@ -136,6 +136,11 @@ func commandParser(client *Client, command, params string) bool {
 				handleNickServMessage(client, strings.TrimPrefix(message, ":"))
 				// Send an acknowledgment to the client
 				client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :NickServ command processed\r\n", ServerNameString, client.Nickname)))
+			} else if strings.EqualFold(target, "ChanServ") {
+				log.Printf("ChanServ command received from %s: %s", client.Nickname, message)
+				ChanServ.HandleMessage(client, strings.TrimPrefix(message, ":"))
+				// Send an acknowledgment to the client
+				client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :ChanServ command processed\r\n", ServerNameString, client.Nickname)))
 			} else {
 				handlePrivmsg(client, target, message)
 			}
