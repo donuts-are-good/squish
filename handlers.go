@@ -114,30 +114,39 @@ func handleJoin(client *Client, channelName string) {
 	}
 
 	// Check if the client is already in the channel
+	isAlreadyInChannel := false
 	for _, ch := range client.Channels {
 		if ch.Name == channelName {
-			log.Printf("Client %s is already in channel %s, ignoring JOIN request", client.Nickname, channelName)
-			return
+			isAlreadyInChannel = true
+			break
 		}
 	}
 
-	// Add the client to the channel in the database
-	err = addClientToChannel(client, channel)
-	if err != nil {
-		log.Printf("Error adding client %s to channel %s: %v", client.Nickname, channelName, err)
-		client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :Failed to join channel\r\n", ServerNameString, client.Nickname, channelName)))
-		return
-	}
+	if !isAlreadyInChannel {
+		// Add the client to the channel in the database
+		err = addClientToChannel(client, channel)
+		if err != nil {
+			log.Printf("Error adding client %s to channel %s: %v", client.Nickname, channelName, err)
+			client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :Failed to join channel\r\n", ServerNameString, client.Nickname, channelName)))
+			return
+		}
 
-	// Add the channel to the client's list of channels
-	client.Channels = append(client.Channels, channel)
+		// Add the channel to the client's list of channels
+		client.Channels = append(client.Channels, channel)
 
-	// Send JOIN message to all clients in the channel, including the joining client
-	joinMessage := fmt.Sprintf(":%s!%s@%s JOIN %s\r\n", client.Nickname, client.Username, client.Hostname, channelName)
-	for _, c := range channel.Clients {
-		c.conn.Write([]byte(joinMessage))
+		// Send JOIN message to all clients in the channel, including the joining client
+		joinMessage := fmt.Sprintf(":%s!%s@%s JOIN %s\r\n", client.Nickname, client.Username, client.Hostname, channelName)
+		channelClients, err := getClientsInChannel(channel)
+		if err != nil {
+			log.Printf("Error getting clients in channel %s: %v", channelName, err)
+		} else {
+			for _, c := range channelClients {
+				if c.conn != nil {
+					c.conn.Write([]byte(joinMessage))
+				}
+			}
+		}
 	}
-	client.conn.Write([]byte(joinMessage))
 
 	// Send channel topic
 	if channel.Topic != "" {
@@ -153,18 +162,29 @@ func handleJoin(client *Client, channelName string) {
 }
 
 func sendNamesListToClient(client *Client, channel *Channel) {
-	var nicknames []string
 	channelClients, err := getClientsInChannel(channel)
 	if err != nil {
 		log.Printf("Error getting clients in channel %s: %v", channel.Name, err)
 		return
 	}
 
+	var nicknames []string
 	for _, c := range channelClients {
 		nicknames = append(nicknames, c.Nickname)
 	}
-	nicknameList := strings.Join(nicknames, " ")
-	client.conn.Write([]byte(fmt.Sprintf(":%s 353 %s = %s :%s\r\n", ServerNameString, client.Nickname, channel.Name, nicknameList)))
+
+	// Send names list in chunks of 10 nicknames
+	for i := 0; i < len(nicknames); i += 10 {
+		end := i + 10
+		if end > len(nicknames) {
+			end = len(nicknames)
+		}
+		chunk := nicknames[i:end]
+		nicknameList := strings.Join(chunk, " ")
+		client.conn.Write([]byte(fmt.Sprintf(":%s 353 %s = %s :%s\r\n", ServerNameString, client.Nickname, channel.Name, nicknameList)))
+	}
+
+	// Send end of names list
 	client.conn.Write([]byte(fmt.Sprintf(":%s 366 %s %s :End of /NAMES list.\r\n", ServerNameString, client.Nickname, channel.Name)))
 }
 
