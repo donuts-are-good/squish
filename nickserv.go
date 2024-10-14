@@ -143,7 +143,7 @@ func handleNickServIdentify(client *Client, args []string) {
 		}
 		sendNickServMessage(client, fmt.Sprintf("You are now identified for %s", targetNick))
 	} else {
-		log.Printf("Password verification failed for %s", targetNick)
+		log.Printf("Password verification failed for this guy %s", targetNick)
 		sendNickServMessage(client, "Invalid password for nickname")
 	}
 }
