@@ -212,7 +212,7 @@ func handleJoin(client *Client, channelNames string) {
 			// If the client is now an operator, send them a notice
 			if isOperator {
 				client.conn.Write([]byte(fmt.Sprintf(":%s MODE %s +o %s\r\n", ServerNameString, channelName, client.Nickname)))
-				client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :You are now channel operator\r\n", ServerNameString, client.Nickname)))
+				client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :You are now channel operator of %s\r\n", ServerNameString, client.Nickname, channelName)))
 			}
 		}
 
