@@ -7,25 +7,28 @@
 Welcome to SQUISH IRC SERVER
 sweet.yachts
 
-Supported commands:
- NICK <nickname>     - Set or change your nickname
- USER <username> * * :<realname>  - Set your username and real name
- JOIN #<channel>     - Join a channel (e.g., JOIN #general)
- PART #<channel>     - Leave a channel
- PRIVMSG <target> :<message>  - Send a message to a channel or user
- LIST                - List all channels
- NAMES #<channel>    - List users in a channel
- TOPIC #<channel> :<topic>  - Set or view channel topic
- MODE <target> <modes>  - Set user or channel modes
- QUIT :<message>    - Disconnect from the server
+Quick Start Guide:
+  1. Set your nickname: /NICK <your_nickname>
+  2. Register your nickname: /MSG NickServ REGISTER <password> <email>
+  3. Join a channel: /JOIN #channel_name
 
-NickServ commands (use /msg NickServ <command>):
- REGISTER <password> <email>  - Register your nickname
- IDENTIFY <password>  - Identify with your registered nickname
- SET PASSWORD <new_password>  - Change your password
- INFO <nickname>      - Get information about a nickname
- GHOST <nickname> <password>  - Disconnect an old session
+General Commands:
+  /JOIN #channel - Join a channel
+  /PART #channel - Leave a channel
+  /PRIVMSG #channel :message - Send a message to a channel
+  /PRIVMSG nickname :message - Send a private message
+  /QUIT :message - Disconnect from the server
+  /LIST - List all channels
+  /NAMES #channel - List users in a channel
+  /TOPIC #channel :new topic - Set a new topic for a channel
+  /MODE #channel +/-mode - Set channel modes
+  /WHO #channel - List users in a channel (detailed)
 
-Default channels: #general, #help, #off-topic
+Nickserv Commands:
+  /MSG NickServ REGISTER <password> <email> - Register your nickname
+  /MSG NickServ IDENTIFY <password> - Identify with your registered nickname
+  /MSG NickServ SET PASSWORD <new_password> - Change your password
+  /MSG NickServ INFO <nickname> - Get information about a nickname
+  /MSG NickServ GHOST <nickname> <password> - Disconnect an old session
 
-Enjoy your stay and happy chatting!
+Enjoy your stay on SQUISH IRC!
