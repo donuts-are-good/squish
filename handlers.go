@@ -350,18 +350,32 @@ func handleUser(client *Client, username, hostname, realname string) {
 }
 
 func completeRegistration(client *Client) {
-	client.CreatedAt = time.Now()
-	client.LastSeen = time.Now()
+	// Check if the nickname already exists in the database
+	existingClient, err := getClientByNickname(client.Nickname)
+	if err == nil && existingClient != nil {
+		// Nickname exists, update the existing record
+		client.ID = existingClient.ID
+		client.CreatedAt = existingClient.CreatedAt
+		client.LastSeen = time.Now()
+		err = updateClientInfo(client)
+	} else {
+		// New nickname, create a new record
+		client.CreatedAt = time.Now()
+		client.LastSeen = time.Now()
+		err = createClient(client)
+	}
 
-	err := createClient(client)
 	if err != nil {
-		log.Printf("Error creating client: %v", err)
+		log.Printf("Error registering client: %v", err)
 		client.conn.Write([]byte(fmt.Sprintf(":%s 451 %s :Failed to register (database error)\r\n", ServerNameString, client.Nickname)))
 		return
 	}
 
 	log.Printf("User registration complete for %s", client.Nickname)
 	sendWelcomeMessages(client)
+
+	// Add the client to the connected clients list
+	addConnectedClient(client)
 
 	// Send instructions to the user
 	client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :Your connection is now registered. To register your nickname, use /msg NickServ REGISTER <password> <email>\r\n", ServerNameString, client.Nickname)))
@@ -870,9 +884,16 @@ func handleNick(client *Client, nickname string) {
 		return
 	}
 
+	// Check if the nickname is already in use by an online user
+	existingOnlineClient := findClientByNickname(nickname)
+	if existingOnlineClient != nil && existingOnlineClient != client {
+		client.conn.Write([]byte(fmt.Sprintf(":%s 433 * %s :Nickname is already in use\r\n", ServerNameString, nickname)))
+		return
+	}
+
 	// Check if the nickname is registered
-	existingClient, err := getClientByNickname(nickname)
-	if err == nil && existingClient != nil {
+	existingRegisteredClient, err := getClientByNickname(nickname)
+	if err == nil && existingRegisteredClient != nil && existingRegisteredClient.Password != "" {
 		// Nickname is registered
 		if !client.IsIdentified || client.Nickname != nickname {
 			// Client is not identified for this nickname
@@ -883,6 +904,9 @@ func handleNick(client *Client, nickname string) {
 
 	oldNickname := client.Nickname
 	client.Nickname = nickname
+
+	// Update the connectedClients map
+	updateConnectedClientNickname(oldNickname, nickname)
 
 	// Update the nickname in the database if the client is already registered
 	if client.ID != 0 {

@@ -85,7 +85,18 @@ func startDB() (*sqlx.DB, error) {
 
 func getClientByNickname(nickname string) (*Client, error) {
 	var client Client
-	err := DB.Get(&client, "SELECT id, nickname, username, hostname, realname, password, invisible, is_operator, has_voice, created_at, is_identified, last_seen, email FROM users WHERE nickname = ?", nickname)
+	query := `
+		SELECT id, nickname, username, 
+			   COALESCE(hostname, '') as hostname, 
+			   COALESCE(realname, '') as realname, 
+			   COALESCE(password, '') as password, 
+			   invisible, is_operator, has_voice, created_at, 
+			   is_identified, last_seen, 
+			   COALESCE(email, '') as email 
+		FROM users 
+		WHERE nickname = ?
+	`
+	err := DB.Get(&client, query, nickname)
 	if err != nil {
 		return nil, err
 	}
@@ -95,9 +106,9 @@ func getClientByNickname(nickname string) (*Client, error) {
 func updateClientInfo(client *Client) error {
 	_, err := DB.Exec(`
 		UPDATE users 
-		SET username = ?, hostname = ?, realname = ?, password = ?, last_seen = ?, email = ?, is_identified = ?
-		WHERE nickname = ?
-	`, client.Username, client.Hostname, client.Realname, client.Password, client.LastSeen, client.Email, client.IsIdentified, client.Nickname)
+		SET username = ?, hostname = ?, realname = ?, last_seen = ?
+		WHERE id = ?
+	`, client.Username, client.Hostname, client.Realname, client.LastSeen, client.ID)
 	return err
 }
 

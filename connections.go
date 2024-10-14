@@ -10,15 +10,17 @@ import (
 )
 
 func handleConnection(conn net.Conn) {
+	client := &Client{conn: conn, Nickname: ""}
+
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("Recovered from panic in handleConnection: %v", r)
 		}
 		log.Printf("Connection closed for %s", conn.RemoteAddr().String())
+		removeConnectedClient(client.Nickname)
 		conn.Close()
 	}()
 
-	client := &Client{conn: conn, Nickname: ""}
 	reader := bufio.NewReader(conn)
 
 	log.Printf("New connection from %s", conn.RemoteAddr().String())

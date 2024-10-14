@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -140,8 +141,10 @@ type ChanServType struct {
 }
 
 var (
-	DB       *sqlx.DB
-	ChanServ *ChanServType
+	DB               *sqlx.DB
+	ChanServ         *ChanServType
+	connectedClients map[string]*Client
+	clientsMutex     sync.RWMutex
 )
 
 func main() {
@@ -171,6 +174,8 @@ func main() {
 
 	// Initialize default channels
 	initializeDefaultChannels()
+
+	connectedClients = make(map[string]*Client)
 
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
@@ -256,12 +261,9 @@ func sanitizeString(input string) string {
 }
 
 func findClientByNickname(nickname string) *Client {
-	var client Client
-	err := DB.Get(&client, "SELECT * FROM users WHERE nickname = ?", nickname)
-	if err != nil {
-		return nil
-	}
-	return &client
+	clientsMutex.RLock()
+	defer clientsMutex.RUnlock()
+	return connectedClients[nickname]
 }
 
 func notifyNicknameChange(client *Client, oldNickname, newNickname string) {
@@ -294,5 +296,27 @@ func initializeDefaultChannels() {
 		} else {
 			log.Printf("Default channel %s is already registered", channelName)
 		}
+	}
+}
+
+// Add these new functions to manage connected clients
+func addConnectedClient(client *Client) {
+	clientsMutex.Lock()
+	defer clientsMutex.Unlock()
+	connectedClients[client.Nickname] = client
+}
+
+func removeConnectedClient(nickname string) {
+	clientsMutex.Lock()
+	defer clientsMutex.Unlock()
+	delete(connectedClients, nickname)
+}
+
+func updateConnectedClientNickname(oldNickname, newNickname string) {
+	clientsMutex.Lock()
+	defer clientsMutex.Unlock()
+	if client, ok := connectedClients[oldNickname]; ok {
+		delete(connectedClients, oldNickname)
+		connectedClients[newNickname] = client
 	}
 }
