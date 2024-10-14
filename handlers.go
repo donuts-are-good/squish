@@ -330,6 +330,7 @@ func handleQuit(client *Client, message string) {
 	}
 
 	removeClient(client)
+	removeConnectedClient(client.Nickname)
 	client.conn.Close()
 }
 

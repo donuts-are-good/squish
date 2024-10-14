@@ -209,4 +209,13 @@ func handleDisconnect(client *Client, err error) {
 	if err != nil {
 		log.Printf("Error updating last_seen for client: %v", err)
 	}
+	// Remove the client from the active sessions
+	removeConnectedClient(client.Nickname)
+	// Reset the client's identification status
+	client.IsIdentified = false
+	_, err = DB.Exec("UPDATE users SET is_identified = ? WHERE id = ?", false, client.ID)
+	if err != nil {
+		log.Printf("Error resetting identification status for client: %v", err)
+	}
+	log.Printf("Client %s (%s) has been disconnected and removed from active sessions", client.Nickname, client.conn.RemoteAddr().String())
 }
