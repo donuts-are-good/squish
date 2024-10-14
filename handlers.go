@@ -161,11 +161,10 @@ func handleJoin(client *Client, channelName string) {
 		}
 	}
 
-	// Send channel topic
+	// Send the channel topic to the joining client
 	if channel.Topic != "" {
-		client.conn.Write([]byte(fmt.Sprintf(":%s 332 %s %s :%s\r\n", ServerNameString, client.Nickname, channel.Name, channel.Topic)))
-	} else {
-		client.conn.Write([]byte(fmt.Sprintf(":%s 331 %s %s :No topic is set\r\n", ServerNameString, client.Nickname, channel.Name)))
+		client.conn.Write([]byte(fmt.Sprintf(":%s 332 %s %s :%s\r\n", ServerNameString, client.Nickname, channelName, channel.Topic)))
+		client.conn.Write([]byte(fmt.Sprintf(":%s 333 %s %s %s %d\r\n", ServerNameString, client.Nickname, channelName, "Unknown", channel.CreatedAt.Unix())))
 	}
 
 	// Send names list
@@ -649,8 +648,6 @@ func handleTopic(client *Client, channelName string, newTopic string) {
 
 	// Prepare the topic change messages
 	topicChangeMessage := fmt.Sprintf(":%s!%s@%s TOPIC %s :%s\r\n", client.Nickname, client.Username, client.Hostname, channelName, newTopic)
-	topicInfoMessage := fmt.Sprintf(":%s 332 %s %s :%s\r\n", ServerNameString, "*", channelName, newTopic)
-	topicSetByMessage := fmt.Sprintf(":%s 333 %s %s %s %d\r\n", ServerNameString, "*", channelName, client.Nickname, time.Now().Unix())
 
 	// Broadcast the topic change to all users in the channel
 	rows, err := DB.Query("SELECT u.nickname FROM users u JOIN user_channels uc ON u.id = uc.user_id WHERE uc.channel_id = ?", channel.ID)
@@ -670,8 +667,8 @@ func handleTopic(client *Client, channelName string, newTopic string) {
 		if targetClient != nil && targetClient.conn != nil {
 			log.Printf("handleTopic: sending topic change to %s", nickname)
 			targetClient.conn.Write([]byte(topicChangeMessage))
-			targetClient.conn.Write([]byte(topicInfoMessage))
-			targetClient.conn.Write([]byte(topicSetByMessage))
+			targetClient.conn.Write([]byte(fmt.Sprintf(":%s 332 %s %s :%s\r\n", ServerNameString, targetClient.Nickname, channelName, newTopic)))
+			targetClient.conn.Write([]byte(fmt.Sprintf(":%s 333 %s %s %s %d\r\n", ServerNameString, targetClient.Nickname, channelName, client.Nickname, time.Now().Unix())))
 		}
 	}
 
