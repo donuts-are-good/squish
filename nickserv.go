@@ -114,7 +114,6 @@ func handleNickServIdentify(client *Client, args []string) {
 		return
 	}
 
-	log.Printf("Stored password hash for %s: %s", targetNick, existingClient.Password)
 	log.Printf("Attempting to verify password for %s", targetNick)
 
 	if verifyPassword(existingClient.Password, password) {
