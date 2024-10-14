@@ -16,7 +16,7 @@ import (
 )
 
 const ServerNameString = "SquishIRC"
-const ServerVersionString = "v0.1.1"
+const ServerVersionString = "v0.1.2"
 
 const (
 	NickSuffix = "_"
