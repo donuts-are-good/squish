@@ -277,11 +277,16 @@ func initializeDefaultChannels() {
 	defaultChannels := []string{"#general", "#help", "#random"}
 	for _, channelName := range defaultChannels {
 		log.Printf("Initializing default channel: %s", channelName)
-		ChanServ.HandleMessage(&Client{
-			Nickname: "Server",
-			Username: "Server",
-			Hostname: "localhost",
-			Realname: "Server",
-		}, fmt.Sprintf("REGISTER %s", channelName))
+		channel, err := getOrCreateChannel(channelName)
+		if err != nil {
+			log.Printf("Error creating default channel %s: %v", channelName, err)
+			continue
+		}
+		err = setChannelRegistered(channel.ID, 0) // Use 0 as the founder ID for server-created channels
+		if err != nil {
+			log.Printf("Error registering default channel %s: %v", channelName, err)
+		} else {
+			log.Printf("Default channel %s registered successfully", channelName)
+		}
 	}
 }

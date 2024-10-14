@@ -133,17 +133,18 @@ func getOrCreateChannel(name string) (*Channel, error) {
 	}
 
 	// Channel doesn't exist, create it
+	log.Printf("Creating new channel: %s", name)
 	result, err := DB.Exec(`
 		INSERT INTO channels (name, topic, created_at)
 		VALUES (?, ?, ?)
 	`, name, "Welcome to "+name, time.Now())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error creating channel %s: %v", name, err)
 	}
 
 	id, err := result.LastInsertId()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error getting last insert ID for channel %s: %v", name, err)
 	}
 
 	channel = Channel{
@@ -154,6 +155,7 @@ func getOrCreateChannel(name string) (*Channel, error) {
 		CreatedAt: time.Now(),
 		Clients:   []*Client{},
 	}
+	log.Printf("Channel created: %+v", channel)
 	return &channel, nil
 }
 
