@@ -103,6 +103,14 @@ func handleNickServIdentify(client *Client, args []string) {
 
 	targetNick, password := args[0], args[1]
 
+	// bcrypt the password
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		log.Printf("Error hashing password: %v", err)
+		sendNickServMessage(client, "Error identifying nickname")
+		return
+	}
+
 	existingClient, err := getClientByNickname(targetNick)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -116,7 +124,7 @@ func handleNickServIdentify(client *Client, args []string) {
 
 	log.Printf("Attempting to verify password for %s", targetNick)
 
-	if verifyPassword(existingClient.Password, password) {
+	if verifyPassword(existingClient.Password, string(hashedPassword)) {
 		// If the client is using a different nickname, change it
 		if client.Nickname != targetNick {
 			oldNickname := client.Nickname
