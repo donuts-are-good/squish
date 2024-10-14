@@ -102,14 +102,8 @@ func main() {
 	// Initialize the ChanServ object
 	ChanServ = NewChanServ()
 
-	// Create default channels
-	defaultChannels := []string{"#general", "#help", "#off-topic"}
-	for _, channelName := range defaultChannels {
-		_, err := getOrCreateChannel(channelName)
-		if err != nil {
-			log.Printf("Error creating default channel %s: %v", channelName, err)
-		}
-	}
+	// Initialize default channels
+	initializeDefaultChannels()
 
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
@@ -275,5 +269,19 @@ func notifyNicknameChange(client *Client, oldNickname, newNickname string) {
 				c.conn.Write([]byte(fmt.Sprintf(":%s NICK %s\r\n", oldNickname, newNickname)))
 			}
 		}
+	}
+}
+
+// Add this new function
+func initializeDefaultChannels() {
+	defaultChannels := []string{"#general", "#help", "#random"}
+	for _, channelName := range defaultChannels {
+		log.Printf("Initializing default channel: %s", channelName)
+		ChanServ.HandleMessage(&Client{
+			Nickname: "Server",
+			Username: "Server",
+			Hostname: "localhost",
+			Realname: "Server",
+		}, fmt.Sprintf("REGISTER %s", channelName))
 	}
 }

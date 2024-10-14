@@ -32,7 +32,12 @@ func (cs *ChanServType) HandleMessage(sender *Client, message string) {
 	command := strings.ToUpper(parts[0])
 	switch command {
 	case "REGISTER":
-		cs.handleRegister(sender, parts[1:])
+		if sender.Nickname == "Server" {
+			// Allow the server to register channels without restrictions
+			cs.handleServerRegister(parts[1:])
+		} else {
+			cs.handleRegister(sender, parts[1:])
+		}
 	case "OP":
 		cs.handleOp(sender, parts[1:])
 	case "DEOP":
@@ -44,6 +49,29 @@ func (cs *ChanServType) HandleMessage(sender *Client, message string) {
 	default:
 		cs.sendHelp(sender)
 	}
+}
+
+func (cs *ChanServType) handleServerRegister(args []string) {
+	if len(args) < 1 {
+		log.Printf("ChanServ: Not enough parameters for REGISTER from server")
+		return
+	}
+
+	channelName := args[0]
+	channel, err := getOrCreateChannel(channelName)
+	if err != nil {
+		log.Printf("ChanServ: Error registering channel %s: %v", channelName, err)
+		return
+	}
+
+	// Set the channel as registered in the database
+	err = setChannelRegistered(channel.ID, 0) // Use 0 as the founder ID for server-created channels
+	if err != nil {
+		log.Printf("ChanServ: Error setting channel %s as registered: %v", channelName, err)
+		return
+	}
+
+	log.Printf("ChanServ: Channel %s has been registered by the server", channelName)
 }
 
 func (cs *ChanServType) handleRegister(sender *Client, args []string) {
