@@ -57,7 +57,10 @@ func startDB() (*sqlx.DB, error) {
 			invite_only BOOLEAN DEFAULT 0,
 			key TEXT,
 			user_limit INTEGER DEFAULT 0,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			is_registered BOOLEAN DEFAULT 0,
+			founder_id INTEGER,
+			FOREIGN KEY (founder_id) REFERENCES users(id)
 		);
 
 		CREATE TABLE IF NOT EXISTS user_channels (
@@ -145,11 +148,11 @@ func getOrCreateChannel(name string) (*Channel, error) {
 	return &channel, nil
 }
 
-func addClientToChannel(client *Client, channel *Channel) error {
+func addClientToChannel(client *Client, channel *Channel, isOperator bool) error {
 	_, err := DB.Exec(`
-		INSERT INTO user_channels (user_id, channel_id)
-		VALUES (?, ?)
-	`, client.ID, channel.ID)
+		INSERT INTO user_channels (user_id, channel_id, is_operator)
+		VALUES (?, ?, ?)
+	`, client.ID, channel.ID, isOperator)
 	return err
 }
 

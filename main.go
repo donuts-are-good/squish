@@ -55,6 +55,8 @@ type Channel struct {
 	Key                sql.NullString `db:"key" json:"key"`
 	UserLimit          int            `db:"user_limit" json:"user_limit"`
 	CreatedAt          time.Time      `db:"created_at" json:"created_at"`
+	IsRegistered       bool           `db:"is_registered" json:"is_registered"`
+	FounderID          sql.NullInt64  `db:"founder_id" json:"founder_id"`
 }
 
 // Add a new struct to represent the user_channels relationship
@@ -66,8 +68,13 @@ type UserChannel struct {
 	JoinedAt   time.Time `db:"joined_at"`
 }
 
+type ChanServType struct {
+	client *Client
+}
+
 var (
-	DB *sqlx.DB
+	DB       *sqlx.DB
+	ChanServ *ChanServType
 )
 
 func main() {
@@ -91,6 +98,9 @@ func main() {
 		log.Fatalf("Failed to start database: %v", err)
 	}
 	defer DB.Close()
+
+	// Initialize the ChanServ object
+	ChanServ = NewChanServ()
 
 	// Create default channels
 	defaultChannels := []string{"#general", "#help", "#off-topic"}

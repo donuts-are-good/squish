@@ -13,6 +13,12 @@ import (
 )
 
 func handlePrivmsg(client *Client, target string, message string) {
+	if strings.EqualFold(target, "ChanServ") {
+		log.Printf("ChanServ command received from %s: %s", client.Nickname, message)
+		ChanServ.HandleMessage(client, strings.TrimPrefix(message, ":"))
+		return
+	}
+
 	if strings.EqualFold(target, "NickServ") {
 		log.Printf("NickServ command received from %s: %s", client.Nickname, message)
 		handleNickServMessage(client, strings.TrimPrefix(message, ":"))
@@ -133,8 +139,7 @@ func handleJoin(client *Client, channelName string) {
 	}
 
 	if !isAlreadyInChannel {
-		// Add the client to the channel in the database
-		err = addClientToChannel(client, channel)
+		err = addClientToChannel(client, channel, false) // Always add as a regular user first
 		if err != nil {
 			log.Printf("Error adding client %s to channel %s: %v", client.Nickname, channelName, err)
 			client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :Failed to join channel\r\n", ServerNameString, client.Nickname, channelName)))
@@ -144,20 +149,13 @@ func handleJoin(client *Client, channelName string) {
 		// Add the channel to the client's list of channels
 		client.Channels = append(client.Channels, channel)
 
-		// Send JOIN message to the client itself first
+		// Send JOIN message to all clients in the channel
 		joinMessage := fmt.Sprintf(":%s!%s@%s JOIN %s\r\n", client.Nickname, client.Username, client.Hostname, channelName)
-		client.conn.Write([]byte(joinMessage))
+		broadcastToChannel(channel, joinMessage)
 
-		// Then send JOIN message to other clients in the channel
-		channelClients, err := getClientsInChannel(channel)
-		if err != nil {
-			log.Printf("Error getting clients in channel %s: %v", channelName, err)
-		} else {
-			for _, c := range channelClients {
-				if c.conn != nil && c != client {
-					c.conn.Write([]byte(joinMessage))
-				}
-			}
+		// If this is a new channel, inform the user about registration
+		if channel.CreatedAt.IsZero() {
+			client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :This channel is not registered. To register it, use /MSG ChanServ REGISTER %s\r\n", ServerNameString, client.Nickname, channelName)))
 		}
 	}
 
@@ -171,6 +169,20 @@ func handleJoin(client *Client, channelName string) {
 	sendNamesListToClient(client, channel)
 
 	log.Printf("JOIN command completed for client %s, channel: %s", client.Nickname, channelName)
+}
+
+// Helper function to broadcast a message to all clients in a channel
+func broadcastToChannel(channel *Channel, message string) {
+	channelClients, err := getClientsInChannel(channel)
+	if err != nil {
+		log.Printf("Error getting clients in channel %s: %v", channel.Name, err)
+		return
+	}
+	for _, c := range channelClients {
+		if c.conn != nil {
+			c.conn.Write([]byte(message))
+		}
+	}
 }
 
 func sendNamesListToClient(client *Client, channel *Channel) {
