@@ -166,7 +166,7 @@ func getOrCreateChannel(name string) (*Channel, error) {
 		CreatedAt: time.Now(),
 		Clients:   []*Client{},
 	}
-	log.Printf("Channel created: %+v", channel)
+	// log.Printf("Channel created: %+v", channel)
 	return &channel, nil
 }
 
