@@ -162,17 +162,6 @@ func removeClientFromChannel(client *Client, channel *Channel) error {
 	return err
 }
 
-func getChannelsForClient(client *Client) ([]*Channel, error) {
-	var channels []*Channel
-	err := DB.Select(&channels, `
-		SELECT c.*
-		FROM channels c
-		JOIN user_channels uc ON c.id = uc.channel_id
-		WHERE uc.user_id = ?
-	`, client.ID)
-	return channels, err
-}
-
 func getClientsInChannel(channel *Channel) ([]*Client, error) {
 	var clients []*Client
 	err := DB.Select(&clients, `

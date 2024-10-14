@@ -33,7 +33,7 @@ type Client struct {
 	Hostname     string     `db:"hostname" json:"hostname"`
 	Realname     string     `db:"realname" json:"realname"`
 	Password     string     `db:"password" json:"-"`
-	Email        string     `db:"email" json:"email"` // Add this line
+	Email        string     `db:"email" json:"email"`
 	Channels     []*Channel `db:"-" json:"channels,omitempty"`
 	Invisible    bool       `db:"invisible" json:"invisible"`
 	IsOperator   bool       `db:"is_operator" json:"is_operator"`

@@ -105,23 +105,7 @@ func handleJoin(client *Client, channelName string) {
 		channelName = "#" + channelName
 	}
 
-	// Get the channels the client is already in
-	clientChannels, err := getChannelsForClient(client)
-	if err != nil {
-		log.Printf("Error getting channels for client %s: %v", client.Nickname, err)
-		client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :Failed to join channel\r\n", ServerNameString, client.Nickname, channelName)))
-		return
-	}
-
-	// Check if the client is already in the channel
-	for _, ch := range clientChannels {
-		if ch.Name == channelName {
-			log.Printf("Client %s is already in channel %s, ignoring JOIN request", client.Nickname, channelName)
-			return
-		}
-	}
-
-	log.Printf("Getting or creating channel: %s", channelName)
+	// Get or create the channel
 	channel, err := getOrCreateChannel(channelName)
 	if err != nil {
 		log.Printf("Error getting or creating channel %s: %v", channelName, err)
@@ -129,13 +113,15 @@ func handleJoin(client *Client, channelName string) {
 		return
 	}
 
-	if channel == nil {
-		log.Printf("Channel %s is nil after getOrCreateChannel", channelName)
-		client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :Failed to join channel\r\n", ServerNameString, client.Nickname, channelName)))
-		return
+	// Check if the client is already in the channel
+	for _, ch := range client.Channels {
+		if ch.Name == channelName {
+			log.Printf("Client %s is already in channel %s, ignoring JOIN request", client.Nickname, channelName)
+			return
+		}
 	}
 
-	log.Printf("Adding client %s to channel %s", client.Nickname, channelName)
+	// Add the client to the channel in the database
 	err = addClientToChannel(client, channel)
 	if err != nil {
 		log.Printf("Error adding client %s to channel %s: %v", client.Nickname, channelName, err)
@@ -143,21 +129,15 @@ func handleJoin(client *Client, channelName string) {
 		return
 	}
 
-	log.Printf("Getting clients in channel %s", channelName)
-	channelClients, err := getClientsInChannel(channel)
-	if err != nil {
-		log.Printf("Error getting clients in channel %s: %v", channelName, err)
-		// Continue with the join process, but log the error
-	}
+	// Add the channel to the client's list of channels
+	client.Channels = append(client.Channels, channel)
 
-	log.Printf("Notifying clients about new join in channel %s", channelName)
-	for _, c := range channelClients {
-		if c.conn != nil {
-			c.conn.Write([]byte(fmt.Sprintf(":%s JOIN %s\r\n", client.Nickname, channel.Name)))
-		} else {
-			log.Printf("Warning: Client %s has nil connection in channel %s", c.Nickname, channelName)
-		}
+	// Send JOIN message to all clients in the channel, including the joining client
+	joinMessage := fmt.Sprintf(":%s!%s@%s JOIN %s\r\n", client.Nickname, client.Username, client.Hostname, channelName)
+	for _, c := range channel.Clients {
+		c.conn.Write([]byte(joinMessage))
 	}
+	client.conn.Write([]byte(joinMessage))
 
 	// Send channel topic
 	if channel.Topic != "" {
@@ -167,15 +147,25 @@ func handleJoin(client *Client, channelName string) {
 	}
 
 	// Send names list
+	sendNamesListToClient(client, channel)
+
+	log.Printf("JOIN command completed for client %s, channel: %s", client.Nickname, channelName)
+}
+
+func sendNamesListToClient(client *Client, channel *Channel) {
 	var nicknames []string
+	channelClients, err := getClientsInChannel(channel)
+	if err != nil {
+		log.Printf("Error getting clients in channel %s: %v", channel.Name, err)
+		return
+	}
+
 	for _, c := range channelClients {
 		nicknames = append(nicknames, c.Nickname)
 	}
 	nicknameList := strings.Join(nicknames, " ")
 	client.conn.Write([]byte(fmt.Sprintf(":%s 353 %s = %s :%s\r\n", ServerNameString, client.Nickname, channel.Name, nicknameList)))
 	client.conn.Write([]byte(fmt.Sprintf(":%s 366 %s %s :End of /NAMES list.\r\n", ServerNameString, client.Nickname, channel.Name)))
-
-	log.Printf("JOIN command completed for client %s, channel: %s", client.Nickname, channelName)
 }
 
 func handleCap(client *Client, params string) {
@@ -237,11 +227,22 @@ func handlePart(client *Client, channelName string) {
 		log.Printf("Error removing client from channel: %v", err)
 	}
 
-	client.conn.Write([]byte(fmt.Sprintf(":%s!%s@%s PART %s\r\n", client.Nickname, client.Nickname, client.conn.RemoteAddr().String(), channelName)))
+	// Remove the channel from the client's list of channels
+	for i, ch := range client.Channels {
+		if ch.Name == channelName {
+			client.Channels = append(client.Channels[:i], client.Channels[i+1:]...)
+			break
+		}
+	}
+
+	partMessage := fmt.Sprintf(":%s!%s@%s PART %s\r\n", client.Nickname, client.Username, client.Hostname, channelName)
+	client.conn.Write([]byte(partMessage))
 
 	// Notify other users in the channel
 	for _, c := range channel.Clients {
-		c.conn.Write([]byte(fmt.Sprintf(":%s!%s@%s PART %s\r\n", client.Nickname, client.Nickname, client.conn.RemoteAddr().String(), channelName)))
+		if c != client {
+			c.conn.Write([]byte(partMessage))
+		}
 	}
 }
 
