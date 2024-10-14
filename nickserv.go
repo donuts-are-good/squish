@@ -137,11 +137,11 @@ func handleNickServIdentify(client *Client, args []string) {
 		client.LastSeen = time.Now()
 		err = updateClientInfo(client)
 		if err != nil {
-			log.Printf("NickServ: Error updating client info for %s: %v", client.Nickname, err)
+			log.Printf("NickServ: Error updating client info for %s: %v", targetNick, err)
 			sendNickServMessage(client, "Error updating client information")
 			return
 		}
-		sendNickServMessage(client, fmt.Sprintf("You are now identified for %s", client.Nickname))
+		sendNickServMessage(client, fmt.Sprintf("You are now identified for %s", targetNick))
 	} else {
 		log.Printf("Password verification failed for %s", targetNick)
 		sendNickServMessage(client, "Invalid password for nickname")
