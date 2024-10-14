@@ -178,12 +178,18 @@ func removeClientFromChannel(client *Client, channel *Channel) error {
 
 func getClientsInChannel(channel *Channel) ([]*Client, error) {
 	var clients []*Client
-	err := DB.Select(&clients, `
-		SELECT u.id, u.nickname, u.username, u.hostname, u.realname, u.invisible, u.is_operator, u.has_voice, u.created_at, u.is_identified, u.last_seen, u.email
+	query := `
+		SELECT u.id, u.nickname, u.username, 
+			   COALESCE(u.hostname, '') as hostname, 
+			   COALESCE(u.realname, '') as realname, 
+			   u.invisible, u.is_operator, u.has_voice, u.created_at, 
+			   u.is_identified, u.last_seen, 
+			   COALESCE(u.email, '') as email
 		FROM users u
 		JOIN user_channels uc ON u.id = uc.user_id
 		WHERE uc.channel_id = ?
-	`, channel.ID)
+	`
+	err := DB.Select(&clients, query, channel.ID)
 	return clients, err
 }
 

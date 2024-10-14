@@ -725,7 +725,7 @@ func handleWho(client *Client, target string) {
 		}
 		users, err = getClientsInChannel(channel)
 		if err != nil {
-			log.Printf("Error getting clients in channel: %v", err)
+			log.Printf("Error getting clients in channel %s: %v", target, err)
 			client.sendNumeric(ERR_UNKNOWNERROR, "Error processing WHO command")
 			return
 		}
