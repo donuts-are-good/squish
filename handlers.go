@@ -378,7 +378,7 @@ func completeRegistration(client *Client) {
 	addConnectedClient(client)
 
 	// Send instructions to the user
-	client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :Your connection is now registered. To register your nickname, use /msg NickServ REGISTER <password> <email>\r\n", ServerNameString, client.Nickname)))
+	client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :To register your nickname, use /msg NickServ REGISTER <password> <email>\r\n", ServerNameString, client.Nickname)))
 	client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :After registering, you can identify using /msg NickServ IDENTIFY <password>\r\n", ServerNameString, client.Nickname)))
 }
 
