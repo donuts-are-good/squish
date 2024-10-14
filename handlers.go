@@ -14,7 +14,9 @@ import (
 
 func handlePrivmsg(client *Client, target string, message string) {
 	if strings.EqualFold(target, "NickServ") {
-		handleNickServMessage(client, message)
+		log.Printf("NickServ command received from %s: %s", client.Nickname, message)
+		handleNickServMessage(client, strings.TrimPrefix(message, ":"))
+		// Remove the acknowledgment message
 		return
 	}
 

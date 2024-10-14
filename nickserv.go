@@ -93,7 +93,7 @@ func handleNickServRegister(client *Client, args []string) {
 		return
 	}
 
-	client.sendNumeric(RPL_NOTICE, "NickServ", fmt.Sprintf("Nickname %s registered successfully", client.Nickname))
+	sendNickServMessage(client, fmt.Sprintf("Nickname %s registered successfully", client.Nickname))
 }
 
 func handleNickServIdentify(client *Client, args []string) {
@@ -220,11 +220,15 @@ func handleNickServGhost(client *Client, args []string) {
 // Helper functions
 
 func (client *Client) sendNumeric(numeric string, params ...string) {
-	message := fmt.Sprintf(":%s %s %s %s\r\n", ServerNameString, numeric, client.Nickname, strings.Join(params, " "))
+	message := fmt.Sprintf(":%s %s %s :%s\r\n", ServerNameString, numeric, client.Nickname, strings.Join(params, " "))
 	client.conn.Write([]byte(message))
 }
 
 func verifyPassword(hashedPassword, password string) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
 	return err == nil
+}
+
+func sendNickServMessage(client *Client, message string) {
+	client.conn.Write([]byte(fmt.Sprintf(":%s PRIVMSG %s :%s\r\n", "NickServ", client.Nickname, message)))
 }
