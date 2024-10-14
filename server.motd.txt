@@ -26,6 +26,10 @@ Implemented Commands:
   /WHOIS <nickname> - Get detailed information about a user
   /PING <server> - Ping the server (automatically handled by most clients)
   /PONG <server> - Reply to a server PING (automatically handled by most clients)
+  /KICK <#channel> <nickname> [:<reason>] - Kick a user from a channel
+  /BAN <#channel> <nickname or hostmask> - Ban a user from a channel
+  /UNBAN <#channel> <nickname or hostmask> - Remove a ban from a channel
+  /BANLIST <#channel> - List all bans in a channel
 
 Supported Modes:
   User Modes:
@@ -39,6 +43,7 @@ Supported Modes:
     +i - Invite-only channel
     +k <key> - Set a channel key (password)
     +l <limit> - Set a user limit for the channel
+    +b <mask> - Set a ban on the channel
     +o <nickname> - Give channel operator status to a user
     +v <nickname> - Give voice status to a user
 
@@ -56,5 +61,6 @@ ChanServ Commands:
   /MSG ChanServ SET <#channel> TOPIC <new_topic> - Change channel topic
   /MSG ChanServ SET <#channel> LIMIT <number> - Set channel user limit
   /MSG ChanServ INFO <#channel> - Get information about a channel
+
 
 Enjoy your stay on SQUISH IRC!
