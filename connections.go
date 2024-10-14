@@ -174,6 +174,18 @@ func commandParser(client *Client, command, params string) bool {
 		log.Println("command: whois")
 		targetParts := strings.SplitN(params, " ", 2)
 		handleWhois(client, targetParts[0])
+	case "KICK":
+		log.Println("command: kick")
+		handleKick(client, params)
+	case "BAN":
+		log.Println("command: ban")
+		handleBan(client, params)
+	case "UNBAN":
+		log.Println("command: unban")
+		handleUnban(client, params)
+	case "BANLIST":
+		log.Println("command: banlist")
+		handleBanList(client, params)
 	default:
 		log.Printf("Unhandled command: %s\n", command)
 		client.conn.Write([]byte(fmt.Sprintf(":%s 421 %s %s :Unknown command\r\n", ServerNameString, client.Nickname, command)))

@@ -175,6 +175,18 @@ func handleJoin(client *Client, channelNames string) {
 		}
 
 		if !isAlreadyInChannel {
+			// Check if the client is banned from the channel
+			isBanned, err := isClientBanned(client, channel)
+			if err != nil {
+				log.Printf("Error checking if client is banned: %v", err)
+				client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :Failed to join channel\r\n", ServerNameString, client.Nickname, channelName)))
+				continue
+			}
+			if isBanned {
+				client.conn.Write([]byte(fmt.Sprintf(":%s 474 %s %s :Cannot join channel (+b)\r\n", ServerNameString, client.Nickname, channelName)))
+				continue
+			}
+
 			// Check if the channel is new (no users yet)
 			userCount, err := getChannelUserCount(channel.ID)
 			if err != nil {
@@ -461,26 +473,21 @@ func handleChannelMode(client *Client, channelName string, modes string) {
 	}
 
 	// Check if the client is a channel operator
-	var isOperator bool
-	err := DB.QueryRow("SELECT is_operator FROM user_channels WHERE user_id = ? AND channel_id = ?", client.ID, channel.ID).Scan(&isOperator)
+	isOperator, err := isClientChannelOperator(client, channel)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			client.conn.Write([]byte(fmt.Sprintf(":%s 442 %s %s :You're not on that channel\r\n", ServerNameString, client.Nickname, channelName)))
-		} else {
-			log.Printf("Error checking operator status: %v", err)
-			client.conn.Write([]byte(fmt.Sprintf(":%s 500 %s :Internal server error\r\n", ServerNameString, client.Nickname)))
-		}
+		log.Printf("Error checking operator status: %v", err)
+		client.conn.Write([]byte(fmt.Sprintf(":%s 500 %s :Internal server error\r\n", ServerNameString, client.Nickname)))
+		return
+	}
+
+	if !isOperator {
+		client.conn.Write([]byte(fmt.Sprintf(":%s 482 %s %s :You're not channel operator\r\n", ServerNameString, client.Nickname, channelName)))
 		return
 	}
 
 	// If no modes are provided, list the current channel modes
 	if modes == "" {
 		listChannelModes(client, channel)
-		return
-	}
-
-	if !isOperator {
-		client.conn.Write([]byte(fmt.Sprintf(":%s 482 %s %s :You're not channel operator\r\n", ServerNameString, client.Nickname, channelName)))
 		return
 	}
 
@@ -496,6 +503,33 @@ func handleChannelMode(client *Client, channelName string, modes string) {
 			adding = true
 		case '-':
 			adding = false
+		case 'b':
+			if argIndex < len(modeArgs) {
+				mask := modeArgs[argIndex]
+				if adding {
+					err := addChannelBan(channel.ID, mask)
+					if err != nil {
+						log.Printf("Error adding channel ban: %v", err)
+						client.conn.Write([]byte(fmt.Sprintf(":%s 500 %s :Error setting mode 'b'\r\n", ServerNameString, client.Nickname)))
+					} else {
+						banMessage := fmt.Sprintf(":%s!%s@%s MODE %s +b %s\r\n", client.Nickname, client.Username, client.Hostname, channelName, mask)
+						broadcastToChannel(channel, banMessage)
+						kickBannedUsers(channel, mask)
+					}
+				} else {
+					err := removeChannelBan(channel.ID, mask)
+					if err != nil {
+						log.Printf("Error removing channel ban: %v", err)
+						client.conn.Write([]byte(fmt.Sprintf(":%s 500 %s :Error removing mode 'b'\r\n", ServerNameString, client.Nickname)))
+					} else {
+						unbanMessage := fmt.Sprintf(":%s!%s@%s MODE %s -b %s\r\n", client.Nickname, client.Username, client.Hostname, channelName, mask)
+						broadcastToChannel(channel, unbanMessage)
+					}
+				}
+				argIndex++
+			} else {
+				client.conn.Write([]byte(fmt.Sprintf(":%s 461 %s MODE :Not enough parameters\r\n", ServerNameString, client.Nickname)))
+			}
 		case 'n':
 			channel.NoExternalMessages = adding
 			_, err := DB.Exec("UPDATE channels SET no_external_messages = ? WHERE name = ?", adding, channelName)
@@ -959,4 +993,198 @@ func handleNick(client *Client, nickname string) {
 	if client.Username != "" && client.ID == 0 {
 		completeRegistration(client)
 	}
+}
+
+func handleKick(client *Client, params string) {
+	parts := strings.SplitN(params, " ", 3)
+	if len(parts) < 2 {
+		client.sendNumeric(ERR_NEEDMOREPARAMS, "KICK", "Not enough parameters")
+		return
+	}
+
+	channelName, targetNick := parts[0], parts[1]
+	reason := ""
+	if len(parts) > 2 {
+		reason = parts[2]
+	}
+
+	channel, err := getChannel(channelName)
+	if err != nil {
+		client.sendNumeric(ERR_NOSUCHCHANNEL, channelName, "No such channel")
+		return
+	}
+
+	// Check if the client is an operator in the channel
+	isOperator, err := isClientChannelOperator(client, channel)
+	if err != nil || !isOperator {
+		client.sendNumeric(ERR_CHANOPRIVSNEEDED, channelName, "You're not channel operator")
+		return
+	}
+
+	targetClient := findClientByNickname(targetNick)
+	if targetClient == nil {
+		client.sendNumeric(ERR_NOSUCHNICK, targetNick, "No such nick/channel")
+		return
+	}
+
+	// Check if the target is in the channel
+	inChannel, err := isClientInChannel(targetClient, channel)
+	if err != nil || !inChannel {
+		client.sendNumeric(ERR_USERNOTINCHANNEL, targetNick, channelName, "They aren't on that channel")
+		return
+	}
+
+	// Perform the kick
+	err = removeClientFromChannel(targetClient, channel)
+	if err != nil {
+		log.Printf("Error kicking user from channel: %v", err)
+		client.sendNumeric(ERR_UNKNOWNERROR, "KICK", "Error kicking user")
+		return
+	}
+
+	kickMessage := fmt.Sprintf(":%s!%s@%s KICK %s %s :%s\r\n", client.Nickname, client.Username, client.Hostname, channelName, targetNick, reason)
+	broadcastToChannel(channel, kickMessage)
+	targetClient.conn.Write([]byte(kickMessage))
+}
+
+func handleBan(client *Client, params string) {
+	parts := strings.SplitN(params, " ", 2)
+	if len(parts) < 2 {
+		client.sendNumeric(ERR_NEEDMOREPARAMS, "BAN", "Not enough parameters")
+		return
+	}
+
+	channelName, mask := parts[0], parts[1]
+
+	channel, err := getChannel(channelName)
+	if err != nil {
+		client.sendNumeric(ERR_NOSUCHCHANNEL, channelName, "No such channel")
+		return
+	}
+
+	// Check if the client is an operator in the channel
+	isOperator, err := isClientChannelOperator(client, channel)
+	if err != nil || !isOperator {
+		client.sendNumeric(ERR_CHANOPRIVSNEEDED, channelName, "You're not channel operator")
+		return
+	}
+
+	// Add the ban
+	err = addChannelBan(channel.ID, mask)
+	if err != nil {
+		log.Printf("Error adding channel ban: %v", err)
+		client.sendNumeric(ERR_UNKNOWNERROR, "BAN", "Error adding ban")
+		return
+	}
+
+	banMessage := fmt.Sprintf(":%s!%s@%s MODE %s +b %s\r\n", client.Nickname, client.Username, client.Hostname, channelName, mask)
+	broadcastToChannel(channel, banMessage)
+
+	// Kick banned users
+	kickBannedUsers(channel, mask)
+}
+
+func handleUnban(client *Client, params string) {
+	parts := strings.SplitN(params, " ", 2)
+	if len(parts) < 2 {
+		client.sendNumeric(ERR_NEEDMOREPARAMS, "UNBAN", "Not enough parameters")
+		return
+	}
+
+	channelName, mask := parts[0], parts[1]
+
+	channel, err := getChannel(channelName)
+	if err != nil {
+		client.sendNumeric(ERR_NOSUCHCHANNEL, channelName, "No such channel")
+		return
+	}
+
+	// Check if the client is an operator in the channel
+	isOperator, err := isClientChannelOperator(client, channel)
+	if err != nil || !isOperator {
+		client.sendNumeric(ERR_CHANOPRIVSNEEDED, channelName, "You're not channel operator")
+		return
+	}
+
+	// Remove the ban
+	err = removeChannelBan(channel.ID, mask)
+	if err != nil {
+		log.Printf("Error removing channel ban: %v", err)
+		client.sendNumeric(ERR_UNKNOWNERROR, "UNBAN", "Error removing ban")
+		return
+	}
+
+	unbanMessage := fmt.Sprintf(":%s!%s@%s MODE %s -b %s\r\n", client.Nickname, client.Username, client.Hostname, channelName, mask)
+	broadcastToChannel(channel, unbanMessage)
+}
+
+// Add this new function to kick banned users
+func kickBannedUsers(channel *Channel, banMask string) {
+	clients, err := getClientsInChannel(channel)
+	if err != nil {
+		log.Printf("Error getting clients in channel: %v", err)
+		return
+	}
+
+	for _, client := range clients {
+		if matchesBanMask(client, banMask) {
+			removeClientFromChannel(client, channel)
+			kickMessage := fmt.Sprintf(":%s KICK %s %s :Banned\r\n", ServerNameString, channel.Name, client.Nickname)
+			broadcastToChannel(channel, kickMessage)
+			client.conn.Write([]byte(kickMessage))
+		}
+	}
+}
+
+// Add this helper function to check if a client matches a ban mask
+func matchesBanMask(client *Client, mask string) bool {
+	fullIdentifier := client.Nickname + "!" + client.Username + "@" + client.Hostname
+	return wildcardMatch(mask, fullIdentifier)
+}
+
+// Add this helper function for wildcard matching
+func wildcardMatch(pattern, str string) bool {
+	if pattern == "*" {
+		return true
+	}
+	return strings.Contains(str, strings.ReplaceAll(pattern, "*", ""))
+}
+
+func handleBanList(client *Client, params string) {
+	channelName := strings.TrimSpace(params)
+	if channelName == "" {
+		client.sendNumeric(ERR_NEEDMOREPARAMS, "BANLIST", "Not enough parameters")
+		return
+	}
+
+	channel, err := getChannel(channelName)
+	if err != nil {
+		client.sendNumeric(ERR_NOSUCHCHANNEL, channelName, "No such channel")
+		return
+	}
+
+	// Check if the client is in the channel
+	inChannel, err := isClientInChannel(client, channel)
+	if err != nil {
+		log.Printf("Error checking if client is in channel: %v", err)
+		client.sendNumeric(ERR_UNKNOWNERROR, "BANLIST", "Error processing command")
+		return
+	}
+	if !inChannel {
+		client.sendNumeric(ERR_NOTONCHANNEL, channelName, "You're not on that channel")
+		return
+	}
+
+	bans, err := getChannelBans(channel.ID)
+	if err != nil {
+		log.Printf("Error getting channel bans: %v", err)
+		client.sendNumeric(ERR_UNKNOWNERROR, "BANLIST", "Error processing command")
+		return
+	}
+
+	for _, ban := range bans {
+		client.sendNumeric(RPL_BANLIST, channelName, ban)
+	}
+
+	client.sendNumeric(RPL_ENDOFBANLIST, channelName, "End of channel ban list")
 }
