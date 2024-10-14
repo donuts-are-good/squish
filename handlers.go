@@ -719,6 +719,7 @@ func handleWho(client *Client, target string) {
 		// WHO for a channel
 		channel, err := getChannel(target)
 		if err != nil {
+			log.Printf("Error getting channel %s: %v", target, err)
 			client.sendNumeric(ERR_NOSUCHCHANNEL, target, "No such channel")
 			return
 		}
@@ -824,10 +825,13 @@ func getClientsByMask(mask string) ([]*Client, error) {
 	mask = strings.ReplaceAll(mask, "*", "%")
 	var clients []*Client
 	query := `
-		SELECT id, nickname, username, hostname, realname, 
+		SELECT id, nickname, username, 
+			   COALESCE(hostname, '') as hostname, 
+			   COALESCE(realname, '') as realname, 
 			   COALESCE(password, '') as password, 
 			   invisible, is_operator, has_voice, created_at, 
-			   is_identified, last_seen, email
+			   is_identified, last_seen, 
+			   COALESCE(email, '') as email
 		FROM users 
 		WHERE nickname LIKE ? OR username LIKE ? OR hostname LIKE ?
 	`
