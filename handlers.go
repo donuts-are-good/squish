@@ -114,32 +114,55 @@ func handleNames(client *Client, channelName string) {
 func handleJoin(client *Client, channelNames string) {
 	log.Printf("Handling JOIN command for client %s, channels: %s", client.Nickname, channelNames)
 
-	// Split the channel names by comma and trim spaces
-	channels := strings.Split(channelNames, ",")
+	// Split the channel names and keys
+	parts := strings.SplitN(channelNames, " ", 2)
+	channelList := strings.Split(parts[0], ",")
+	keys := []string{}
+	if len(parts) > 1 {
+		keys = strings.Split(parts[1], ",")
+	}
 
-	for _, channelName := range channels {
-		// Trim spaces
+	log.Printf("Channels after split: %v, Keys: %v", channelList, keys)
+
+	// Validate and filter channel names
+	var validChannels []string
+	for _, channelName := range channelList {
 		channelName = strings.TrimSpace(channelName)
-
-		// Skip empty channel names
-		if channelName == "" {
+		if channelName == "" || strings.EqualFold(channelName, "na") {
+			log.Printf("Skipping invalid channel name: '%s'", channelName)
 			continue
 		}
-
-		// Ensure the channel name starts with #
 		if !strings.HasPrefix(channelName, "#") {
 			channelName = "#" + channelName
 		}
+		validChannels = append(validChannels, channelName)
+	}
 
-		// Remove any additional parameters (like keys) from the channel name
-		channelParts := strings.Fields(channelName)
-		channelName = channelParts[0]
+	// Remove the last element if it's "na"
+	if len(validChannels) > 0 && strings.EqualFold(validChannels[len(validChannels)-1], "#na") {
+		validChannels = validChannels[:len(validChannels)-1]
+	}
+
+	log.Printf("Valid channels: %v", validChannels)
+
+	for i, channelName := range validChannels {
+		// Get the key for this channel, if provided
+		var key string
+		if i < len(keys) {
+			key = keys[i]
+		}
 
 		// Get or create the channel
 		channel, err := getOrCreateChannel(channelName)
 		if err != nil {
 			log.Printf("Error getting or creating channel %s: %v", channelName, err)
 			client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :Failed to join channel\r\n", ServerNameString, client.Nickname, channelName)))
+			continue
+		}
+
+		// Check if the channel requires a key
+		if channel.Key.Valid && channel.Key.String != "" && key != channel.Key.String {
+			client.conn.Write([]byte(fmt.Sprintf(":%s 475 %s %s :Cannot join channel (+k) - bad key\r\n", ServerNameString, client.Nickname, channelName)))
 			continue
 		}
 
@@ -203,7 +226,7 @@ func handleJoin(client *Client, channelNames string) {
 		sendNamesListToClient(client, channel)
 	}
 
-	log.Printf("JOIN command completed for client %s", client.Nickname)
+	log.Printf("Finished processing JOIN command for client %s", client.Nickname)
 }
 
 // Helper function to broadcast a message to all clients in a channel

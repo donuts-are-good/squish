@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -129,6 +130,11 @@ func createClient(client *Client) error {
 }
 
 func getOrCreateChannel(name string) (*Channel, error) {
+	// Reject attempts to create a channel named "na"
+	if strings.EqualFold(name, "#na") {
+		return nil, fmt.Errorf("invalid channel name: %s", name)
+	}
+
 	var channel Channel
 	err := DB.Get(&channel, "SELECT * FROM channels WHERE name = ?", name)
 	if err == nil {
