@@ -158,8 +158,11 @@ func handleJoin(client *Client, channelNames string) {
 			// Add the client to the channel's list of clients
 			channel.Clients = append(channel.Clients, client)
 
-			// Send JOIN message to all clients in the channel
+			// Send JOIN message to the client who is joining
 			joinMessage := fmt.Sprintf(":%s!%s@%s JOIN %s\r\n", client.Nickname, client.Username, client.Hostname, channelName)
+			client.conn.Write([]byte(joinMessage))
+
+			// Send JOIN message to all other clients in the channel
 			broadcastToChannel(channel, joinMessage)
 
 			// If this is a new channel, inform the user about registration
