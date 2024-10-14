@@ -823,7 +823,15 @@ func getAllVisibleClients() ([]*Client, error) {
 func getClientsByMask(mask string) ([]*Client, error) {
 	mask = strings.ReplaceAll(mask, "*", "%")
 	var clients []*Client
-	err := DB.Select(&clients, "SELECT * FROM users WHERE nickname LIKE ? OR username LIKE ? OR hostname LIKE ?", mask, mask, mask)
+	query := `
+		SELECT id, nickname, username, hostname, realname, 
+			   COALESCE(password, '') as password, 
+			   invisible, is_operator, has_voice, created_at, 
+			   is_identified, last_seen, email
+		FROM users 
+		WHERE nickname LIKE ? OR username LIKE ? OR hostname LIKE ?
+	`
+	err := DB.Select(&clients, query, mask, mask, mask)
 	return clients, err
 }
 
