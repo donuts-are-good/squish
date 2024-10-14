@@ -4,12 +4,9 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"math/rand"
 	"strconv"
 	"strings"
 	"time"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 func handlePrivmsg(client *Client, target string, message string) {
@@ -353,25 +350,12 @@ func handleUser(client *Client, username, hostname, realname string) {
 }
 
 func completeRegistration(client *Client) {
-	// Generate a random password
-	password := generateRandomPassword(10)
-
-	// Hash the password
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		log.Printf("Error hashing password: %v", err)
-		client.conn.Write([]byte(fmt.Sprintf(":%s 451 %s :Failed to register (password hashing error)\r\n", ServerNameString, client.Nickname)))
-		return
-	}
-
-	client.Password = string(hashedPassword)
-	client.IsIdentified = true // Set the client as identified
 	client.CreatedAt = time.Now()
 	client.LastSeen = time.Now()
 
-	err = createOrUpdateClient(client, string(hashedPassword))
+	err := createClient(client)
 	if err != nil {
-		log.Printf("Error updating client information: %v", err)
+		log.Printf("Error creating client: %v", err)
 		client.conn.Write([]byte(fmt.Sprintf(":%s 451 %s :Failed to register (database error)\r\n", ServerNameString, client.Nickname)))
 		return
 	}
@@ -379,19 +363,9 @@ func completeRegistration(client *Client) {
 	log.Printf("User registration complete for %s", client.Nickname)
 	sendWelcomeMessages(client)
 
-	// Send the password and instructions to the user
-	client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :Your account username: '%s' nickname: '%s' has been registered with the password: %s\r\n", ServerNameString, client.Nickname, client.Username, client.Nickname, password)))
-	client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :To change your password, use the command: /msg NickServ SET PASSWORD <new_password>\r\n", ServerNameString, client.Nickname)))
-}
-
-func generateRandomPassword(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
-	seededRand := rand.New(rand.NewSource(time.Now().UnixNano()))
-	password := make([]byte, length)
-	for i := range password {
-		password[i] = charset[seededRand.Intn(len(charset))]
-	}
-	return string(password)
+	// Send instructions to the user
+	client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :Your connection is now registered. To register your nickname, use /msg NickServ REGISTER <password> <email>\r\n", ServerNameString, client.Nickname)))
+	client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :After registering, you can identify using /msg NickServ IDENTIFY <password>\r\n", ServerNameString, client.Nickname)))
 }
 
 func handleMode(client *Client, target string, modes string) {
@@ -874,4 +848,47 @@ func hasChannelVoice(client *Client, channel *Channel) bool {
 	var hasVoice bool
 	err := DB.QueryRow("SELECT has_voice FROM user_channels WHERE user_id = ? AND channel_id = ?", client.ID, channel.ID).Scan(&hasVoice)
 	return err == nil && hasVoice
+}
+
+func handleNick(client *Client, nickname string) {
+	log.Printf("Handling NICK command for %s, new nickname: %s", client.conn.RemoteAddr().String(), nickname)
+	if len(nickname) > 50 {
+		log.Printf("Nickname too long: %s", nickname)
+		client.conn.Write([]byte(fmt.Sprintf(":%s 432 * %s :Erroneous nickname\r\n", ServerNameString, nickname)))
+		return
+	}
+
+	// Check if the nickname is registered
+	existingClient, err := getClientByNickname(nickname)
+	if err == nil && existingClient != nil {
+		// Nickname is registered
+		if !client.IsIdentified || client.Nickname != nickname {
+			// Client is not identified for this nickname
+			client.conn.Write([]byte(fmt.Sprintf(":%s 433 * %s :Nickname is registered. Use /msg NickServ IDENTIFY password to use this nick.\r\n", ServerNameString, nickname)))
+			return
+		}
+	}
+
+	oldNickname := client.Nickname
+	client.Nickname = nickname
+
+	// Update the nickname in the database if the client is already registered
+	if client.ID != 0 {
+		err := updateClientNickname(client)
+		if err != nil {
+			log.Printf("Error updating client nickname in database: %v", err)
+			client.Nickname = oldNickname
+			client.conn.Write([]byte(fmt.Sprintf(":%s 432 %s :Nickname change failed\r\n", ServerNameString, nickname)))
+			return
+		}
+	}
+
+	// Notify the client and other users about the nickname change
+	client.conn.Write([]byte(fmt.Sprintf(":%s NICK %s\r\n", oldNickname, nickname)))
+	notifyNicknameChange(client, oldNickname, nickname)
+
+	// Check if we have both NICK and USER info
+	if client.Username != "" && client.ID == 0 {
+		completeRegistration(client)
+	}
 }

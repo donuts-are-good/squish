@@ -4,10 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"math/rand"
 	"net"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -264,71 +262,6 @@ func findClientByNickname(nickname string) *Client {
 		return nil
 	}
 	return &client
-}
-
-// Modify the handleNick function
-func handleNick(client *Client, nickname string) {
-	log.Printf("Handling NICK command for %s, new nickname: %s", client.conn.RemoteAddr().String(), nickname)
-	if len(nickname) > 50 {
-		log.Printf("Nickname too long: %s", nickname)
-		client.conn.Write([]byte(fmt.Sprintf(":%s 432 * %s :Erroneous nickname\r\n", ServerNameString, nickname)))
-		return
-	}
-
-	// Check if the nickname is already in use
-	if isNicknameInUse(nickname) {
-		// Nickname is in use
-		if client.IsIdentified && client.Nickname == nickname {
-			// Client is already identified for this nickname
-			return
-		}
-
-		// Inform the client that the nickname is in use
-		client.conn.Write([]byte(fmt.Sprintf(":%s 433 * %s :Nickname is already in use\r\n", ServerNameString, nickname)))
-
-		// Generate a unique nickname
-		uniqueNickname := generateUniqueNickname(nickname)
-		client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE * :Your nickname has been changed to %s\r\n", ServerNameString, uniqueNickname)))
-		nickname = uniqueNickname
-	}
-
-	oldNickname := client.Nickname
-	client.Nickname = nickname
-
-	// Update the nickname in the database if the client is already registered
-	if client.ID != 0 {
-		err := updateClientNickname(client)
-		if err != nil {
-			log.Printf("Error updating client nickname in database: %v", err)
-			client.Nickname = oldNickname
-			client.conn.Write([]byte(fmt.Sprintf(":%s 432 %s :Nickname change failed\r\n", ServerNameString, nickname)))
-			return
-		}
-	}
-
-	// Notify the client and other users about the nickname change
-	client.conn.Write([]byte(fmt.Sprintf(":%s NICK %s\r\n", oldNickname, nickname)))
-	notifyNicknameChange(client, oldNickname, nickname)
-
-	// Check if we have both NICK and USER info
-	if client.Username != "" && client.ID == 0 {
-		completeRegistration(client)
-	}
-}
-
-// Add this helper function
-func isNicknameInUse(nickname string) bool {
-	_, err := getClientByNickname(nickname)
-	return err == nil
-}
-
-func generateUniqueNickname(base string) string {
-	newNickname := base
-	for isNicknameInUse(newNickname) {
-		randomSuffix := rand.Intn(8889) + 1111 // Generates a number between 1111 and 9999
-		newNickname = fmt.Sprintf("%s-%s", base, strconv.Itoa(randomSuffix))
-	}
-	return newNickname
 }
 
 func notifyNicknameChange(client *Client, oldNickname, newNickname string) {

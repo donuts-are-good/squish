@@ -58,7 +58,7 @@ func sendNickServHelp(client *Client) {
 
 func handleNickServRegister(client *Client, args []string) {
 	if len(args) < 2 {
-		client.sendNumeric(ERR_NEEDMOREPARAMS, "REGISTER", "Not enough parameters")
+		sendNickServMessage(client, "Syntax: REGISTER <password> <email>")
 		return
 	}
 
@@ -66,8 +66,8 @@ func handleNickServRegister(client *Client, args []string) {
 
 	// Check if the nickname is already registered
 	existingClient, err := getClientByNickname(client.Nickname)
-	if err == nil && existingClient != nil {
-		client.sendNumeric(ERR_NICKNAMEINUSE, client.Nickname, "Nickname is already registered")
+	if err == nil && existingClient != nil && existingClient.Password != "" {
+		sendNickServMessage(client, "This nickname is already registered.")
 		return
 	}
 
@@ -75,23 +75,22 @@ func handleNickServRegister(client *Client, args []string) {
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		log.Printf("Error hashing password: %v", err)
-		client.sendNumeric(ERR_UNKNOWNERROR, "Error registering nickname")
+		sendNickServMessage(client, "Error registering nickname")
 		return
 	}
 
-	// Create the client in the database
+	// Update the client in the database
 	client.Password = string(hashedPassword)
 	client.Email = email
-	client.CreatedAt = time.Now()
-	client.LastSeen = time.Now()
-	err = createClient(client)
+	err = updateClientInfo(client)
 	if err != nil {
-		log.Printf("Error creating client: %v", err)
-		client.sendNumeric(ERR_UNKNOWNERROR, "Error registering nickname")
+		log.Printf("Error updating client: %v", err)
+		sendNickServMessage(client, "Error registering nickname")
 		return
 	}
 
 	sendNickServMessage(client, fmt.Sprintf("Nickname %s registered successfully", client.Nickname))
+	sendNickServMessage(client, "You can now identify using /msg NickServ IDENTIFY <password>")
 }
 
 func handleNickServIdentify(client *Client, args []string) {

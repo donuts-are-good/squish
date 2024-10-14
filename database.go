@@ -103,9 +103,9 @@ func updateClientInfo(client *Client) error {
 
 func createClient(client *Client) error {
 	result, err := DB.Exec(`
-		INSERT INTO users (nickname, username, hostname, realname, password, created_at, last_seen, email)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		`, client.Nickname, client.Username, client.Hostname, client.Realname, client.Password, client.CreatedAt, client.LastSeen, client.Email)
+		INSERT INTO users (nickname, username, hostname, realname, created_at, last_seen)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, client.Nickname, client.Username, client.Hostname, client.Realname, client.CreatedAt, client.LastSeen)
 	if err != nil {
 		return err
 	}
@@ -201,23 +201,6 @@ func getChannelUserCount(channelID int64) (int, error) {
 
 func updateClientNickname(client *Client) error {
 	_, err := DB.Exec("UPDATE users SET nickname = ? WHERE id = ?", client.Nickname, client.ID)
-	return err
-}
-
-func createOrUpdateClient(client *Client, password string) error {
-	var err error
-	existingClient, err := getClientByNickname(client.Nickname)
-	if err == sql.ErrNoRows {
-		// New client, create a new database entry
-		err = createClient(client)
-	} else if err == nil {
-		// Existing client, update the database entry
-		client.ID = existingClient.ID
-		client.Password = password
-		err = updateClientInfo(client)
-	} else {
-		return err
-	}
 	return err
 }
 
