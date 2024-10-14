@@ -50,7 +50,7 @@ func handleNickServMessage(client *Client, message string) {
 func sendNickServHelp(client *Client) {
 	sendNickServMessage(client, "Available commands:")
 	sendNickServMessage(client, "REGISTER <password> <email> - Register your nickname")
-	sendNickServMessage(client, "IDENTIFY <password> - Identify with your nickname")
+	sendNickServMessage(client, "IDENTIFY <nickname> <password> - Identify with a nickname")
 	sendNickServMessage(client, "SET PASSWORD <new_password> - Change your password")
 	sendNickServMessage(client, "INFO <nickname> - Get information about a nickname")
 	sendNickServMessage(client, "GHOST <nickname> <password> - Disconnect an old session")
@@ -96,16 +96,17 @@ func handleNickServRegister(client *Client, args []string) {
 
 func handleNickServIdentify(client *Client, args []string) {
 	log.Printf("NickServ: Handling IDENTIFY command for %s", client.Nickname)
-	if len(args) < 1 {
-		sendNickServMessage(client, "Syntax: IDENTIFY <password>")
+	if len(args) < 2 {
+		sendNickServMessage(client, "Syntax: IDENTIFY <nickname> <password>")
 		return
 	}
 
-	password := args[0]
-	existingClient, err := getClientByNickname(client.Nickname)
+	targetNick, password := args[0], args[1]
+
+	existingClient, err := getClientByNickname(targetNick)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			sendNickServMessage(client, "This nickname is not registered.")
+			sendNickServMessage(client, fmt.Sprintf("The nickname %s is not registered.", targetNick))
 		} else {
 			log.Printf("NickServ: Error fetching client from database: %v", err)
 			sendNickServMessage(client, "Error identifying nickname")
@@ -113,10 +114,25 @@ func handleNickServIdentify(client *Client, args []string) {
 		return
 	}
 
-	log.Printf("Stored password hash for %s: %s", client.Nickname, existingClient.Password)
-	log.Printf("Attempting to verify password: %s", password)
+	log.Printf("Stored password hash for %s: %s", targetNick, existingClient.Password)
+	log.Printf("Attempting to verify password for %s", targetNick)
 
 	if verifyPassword(existingClient.Password, password) {
+		// If the client is using a different nickname, change it
+		if client.Nickname != targetNick {
+			oldNickname := client.Nickname
+			client.Nickname = targetNick
+			updateConnectedClientNickname(oldNickname, targetNick)
+			err := updateClientNickname(client)
+			if err != nil {
+				log.Printf("Error updating client nickname: %v", err)
+				sendNickServMessage(client, "Error updating nickname")
+				return
+			}
+			client.conn.Write([]byte(fmt.Sprintf(":%s NICK %s\r\n", oldNickname, targetNick)))
+			notifyNicknameChange(client, oldNickname, targetNick)
+		}
+
 		client.IsIdentified = true
 		client.LastSeen = time.Now()
 		err = updateClientInfo(client)
@@ -127,7 +143,7 @@ func handleNickServIdentify(client *Client, args []string) {
 		}
 		sendNickServMessage(client, fmt.Sprintf("You are now identified for %s", client.Nickname))
 	} else {
-		log.Printf("Password verification failed for %s", client.Nickname)
+		log.Printf("Password verification failed for %s", targetNick)
 		sendNickServMessage(client, "Invalid password for nickname")
 	}
 }
