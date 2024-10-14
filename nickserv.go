@@ -115,8 +115,8 @@ func handleNickServIdentify(client *Client, args []string) {
 	}
 
 	log.Printf("Attempting to verify password for %s", targetNick)
-	log.Printf("Stored password hash: %s", existingClient.Password)
-	log.Printf("Supplied password: %s", password)
+	log.Printf("Stored password hash: '%s'", existingClient.Password)
+	log.Printf("Supplied password: '%s'", password)
 
 	if verifyPassword(existingClient.Password, password) {
 		// If the client is using a different nickname, change it
@@ -239,12 +239,17 @@ func (client *Client) sendNumeric(numeric string, params ...string) {
 }
 
 func verifyPassword(hashedPassword, password string) bool {
-	log.Printf("Comparing hashedPassword: %s with password: %s", hashedPassword, password)
+	log.Printf("Comparing hashedPassword: '%s' with password: '%s'", hashedPassword, password)
+	if hashedPassword == "" {
+		log.Printf("Error: Stored hashed password is empty")
+		return false
+	}
 	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
 	if err != nil {
 		log.Printf("Password verification failed: %v", err)
+		return false
 	}
-	return err == nil
+	return true
 }
 
 func sendNickServMessage(client *Client, message string) {
