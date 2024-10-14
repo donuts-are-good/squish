@@ -3,7 +3,6 @@
 ┗┛┗┫┗┻┗┛┛┗ v0.1.2
    ┗   
 
-
 Welcome to SQUISH IRC SERVER
 sweet.yachts
 
@@ -12,23 +11,35 @@ Quick Start Guide:
   2. Register your nickname: /MSG NickServ REGISTER <password> <email>
   3. Join a channel: /JOIN #channel_name
 
-General Commands:
-  /JOIN #channel - Join a channel
-  /PART #channel - Leave a channel
-  /PRIVMSG #channel :message - Send a message to a channel
-  /PRIVMSG nickname :message - Send a private message
-  /QUIT :message - Disconnect from the server
+Implemented Commands:
+  /NICK <nickname> - Change your nickname
+  /USER <username> <hostname> <servername> :<realname> - Set your user information
+  /JOIN #channel[,#channel2,...] [key] - Join one or more channels
+  /PART #channel[,#channel2,...] - Leave one or more channels
+  /PRIVMSG <target> :<message> - Send a message to a channel or user
+  /QUIT [:<message>] - Disconnect from the server
   /LIST - List all channels
-  /NAMES #channel - List users in a channel
-  /TOPIC #channel :new topic - Set a new topic for a channel
-  /MODE #channel +/-mode - Set channel modes
-  /WHO #channel - List users in a channel (detailed)
+  /NAMES [#channel] - List users in a channel or all visible users
+  /TOPIC #channel [:<new topic>] - View or set a channel's topic
+  /MODE <target> <modes> [<mode arguments>] - Set or remove channel/user modes
+  /WHO [<mask>] - List information about users
+  /WHOIS <nickname> - Get detailed information about a user
+  /PING <server> - Ping the server (automatically handled by most clients)
+  /PONG <server> - Reply to a server PING (automatically handled by most clients)
 
-Nickserv Commands:
+NickServ Commands:
   /MSG NickServ REGISTER <password> <email> - Register your nickname
-  /MSG NickServ IDENTIFY <password> - Identify with your registered nickname
+  /MSG NickServ IDENTIFY <nickname> <password> - Identify with your registered nickname
   /MSG NickServ SET PASSWORD <new_password> - Change your password
   /MSG NickServ INFO <nickname> - Get information about a nickname
   /MSG NickServ GHOST <nickname> <password> - Disconnect an old session
+
+ChanServ Commands:
+  /MSG ChanServ REGISTER <#channel> - Register a channel
+  /MSG ChanServ OP <#channel> <nickname> - Give operator status to a user
+  /MSG ChanServ DEOP <#channel> <nickname> - Remove operator status from a user
+  /MSG ChanServ SET <#channel> TOPIC <new_topic> - Change channel topic
+  /MSG ChanServ SET <#channel> LIMIT <number> - Set channel user limit
+  /MSG ChanServ INFO <#channel> - Get information about a channel
 
 Enjoy your stay on SQUISH IRC!
