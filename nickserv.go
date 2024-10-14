@@ -247,7 +247,7 @@ func (client *Client) sendNumeric(numeric string, params ...string) {
 func verifyPassword(hashedPassword, password string) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
 	if err != nil {
-		log.Printf("Password verification failed: %v", err)
+		log.Printf("Password verification failed here: %v", err)
 	}
 	return err == nil
 }
