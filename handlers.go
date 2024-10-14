@@ -114,61 +114,67 @@ func handleNames(client *Client, channelName string) {
 	log.Println("handleNames: completed")
 }
 
-func handleJoin(client *Client, channelName string) {
-	log.Printf("Handling JOIN command for client %s, channel: %s", client.Nickname, channelName)
+func handleJoin(client *Client, channelNames string) {
+	log.Printf("Handling JOIN command for client %s, channels: %s", client.Nickname, channelNames)
 
-	if !strings.HasPrefix(channelName, "#") {
-		channelName = "#" + channelName
-	}
+	// Split the channel names by comma
+	channels := strings.Split(channelNames, ",")
 
-	// Get or create the channel
-	channel, err := getOrCreateChannel(channelName)
-	if err != nil {
-		log.Printf("Error getting or creating channel %s: %v", channelName, err)
-		client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :Failed to join channel\r\n", ServerNameString, client.Nickname, channelName)))
-		return
-	}
-
-	// Check if the client is already in the channel
-	isAlreadyInChannel := false
-	for _, ch := range client.Channels {
-		if ch.Name == channelName {
-			isAlreadyInChannel = true
-			break
+	for _, channelName := range channels {
+		channelName = strings.TrimSpace(channelName)
+		if !strings.HasPrefix(channelName, "#") {
+			channelName = "#" + channelName
 		}
-	}
 
-	if !isAlreadyInChannel {
-		err = addClientToChannel(client, channel, false) // Always add as a regular user first
+		// Get or create the channel
+		channel, err := getOrCreateChannel(channelName)
 		if err != nil {
-			log.Printf("Error adding client %s to channel %s: %v", client.Nickname, channelName, err)
+			log.Printf("Error getting or creating channel %s: %v", channelName, err)
 			client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :Failed to join channel\r\n", ServerNameString, client.Nickname, channelName)))
-			return
+			continue
 		}
 
-		// Add the channel to the client's list of channels
-		client.Channels = append(client.Channels, channel)
-
-		// Send JOIN message to all clients in the channel
-		joinMessage := fmt.Sprintf(":%s!%s@%s JOIN %s\r\n", client.Nickname, client.Username, client.Hostname, channelName)
-		broadcastToChannel(channel, joinMessage)
-
-		// If this is a new channel, inform the user about registration
-		if channel.CreatedAt.IsZero() {
-			client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :This channel is not registered. To register it, use /MSG ChanServ REGISTER %s\r\n", ServerNameString, client.Nickname, channelName)))
+		// Check if the client is already in the channel
+		isAlreadyInChannel := false
+		for _, ch := range client.Channels {
+			if ch.Name == channelName {
+				isAlreadyInChannel = true
+				break
+			}
 		}
+
+		if !isAlreadyInChannel {
+			err = addClientToChannel(client, channel, false) // Always add as a regular user first
+			if err != nil {
+				log.Printf("Error adding client %s to channel %s: %v", client.Nickname, channelName, err)
+				client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :Failed to join channel\r\n", ServerNameString, client.Nickname, channelName)))
+				continue
+			}
+
+			// Add the channel to the client's list of channels
+			client.Channels = append(client.Channels, channel)
+
+			// Send JOIN message to all clients in the channel
+			joinMessage := fmt.Sprintf(":%s!%s@%s JOIN %s\r\n", client.Nickname, client.Username, client.Hostname, channelName)
+			broadcastToChannel(channel, joinMessage)
+
+			// If this is a new channel, inform the user about registration
+			if channel.CreatedAt.IsZero() {
+				client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :This channel is not registered. To register it, use /MSG ChanServ REGISTER %s\r\n", ServerNameString, client.Nickname, channelName)))
+			}
+		}
+
+		// Send the channel topic to the joining client
+		if channel.Topic != "" {
+			client.conn.Write([]byte(fmt.Sprintf(":%s 332 %s %s :%s\r\n", ServerNameString, client.Nickname, channelName, channel.Topic)))
+			client.conn.Write([]byte(fmt.Sprintf(":%s 333 %s %s %s %d\r\n", ServerNameString, client.Nickname, channelName, "Unknown", channel.CreatedAt.Unix())))
+		}
+
+		// Send names list
+		sendNamesListToClient(client, channel)
 	}
 
-	// Send the channel topic to the joining client
-	if channel.Topic != "" {
-		client.conn.Write([]byte(fmt.Sprintf(":%s 332 %s %s :%s\r\n", ServerNameString, client.Nickname, channelName, channel.Topic)))
-		client.conn.Write([]byte(fmt.Sprintf(":%s 333 %s %s %s %d\r\n", ServerNameString, client.Nickname, channelName, "Unknown", channel.CreatedAt.Unix())))
-	}
-
-	// Send names list
-	sendNamesListToClient(client, channel)
-
-	log.Printf("JOIN command completed for client %s, channel: %s", client.Nickname, channelName)
+	log.Printf("JOIN command completed for client %s", client.Nickname)
 }
 
 // Helper function to broadcast a message to all clients in a channel

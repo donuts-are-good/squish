@@ -113,9 +113,8 @@ func commandParser(client *Client, command, params string) bool {
 		handleNames(client, channelName)
 	case "JOIN":
 		log.Println("command: join")
-		channelName := strings.Split(params, " ")[0] // Take only the first parameter
-		sanitizedChannelName := sanitizeString(channelName)
-		handleJoin(client, sanitizedChannelName)
+		channelNames := strings.TrimSpace(params)
+		handleJoin(client, channelNames)
 	case "PART":
 		log.Println("command: part")
 		sanitizedChannelName := sanitizeString(params)
