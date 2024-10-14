@@ -81,9 +81,20 @@ func (cs *ChanServType) handleRegister(sender *Client, args []string) {
 	}
 
 	channelName := args[0]
-	channel, err := getOrCreateChannel(channelName)
+	if !strings.HasPrefix(channelName, "#") {
+		channelName = "#" + channelName
+	}
+
+	// Check if the channel exists
+	channel, err := getChannel(channelName)
 	if err != nil {
-		cs.sendNotice(sender, fmt.Sprintf("Error registering channel: %v", err))
+		cs.sendNotice(sender, fmt.Sprintf("Error: Channel %s does not exist.", channelName))
+		return
+	}
+
+	// Check if the channel is already registered
+	if channel.IsRegistered {
+		cs.sendNotice(sender, fmt.Sprintf("Channel %s is already registered.", channelName))
 		return
 	}
 
