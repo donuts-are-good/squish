@@ -282,11 +282,15 @@ func initializeDefaultChannels() {
 			log.Printf("Error creating default channel %s: %v", channelName, err)
 			continue
 		}
-		err = setChannelRegistered(channel.ID, 0) // Use 0 as the founder ID for server-created channels
-		if err != nil {
-			log.Printf("Error registering default channel %s: %v", channelName, err)
+		if !channel.IsRegistered {
+			err = setChannelRegistered(channel.ID, 0) // Use 0 as the founder ID for server-created channels
+			if err != nil {
+				log.Printf("Error registering default channel %s: %v", channelName, err)
+			} else {
+				log.Printf("Default channel %s registered successfully", channelName)
+			}
 		} else {
-			log.Printf("Default channel %s registered successfully", channelName)
+			log.Printf("Default channel %s is already registered", channelName)
 		}
 	}
 }

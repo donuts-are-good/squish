@@ -117,16 +117,18 @@ func handleNames(client *Client, channelName string) {
 func handleJoin(client *Client, channelNames string) {
 	log.Printf("Handling JOIN command for client %s, channels: %s", client.Nickname, channelNames)
 
-	// Split the channel names by comma and space
-	channels := strings.FieldsFunc(channelNames, func(r rune) bool {
-		return r == ',' || r == ' '
-	})
+	// Split the channel names by comma only
+	channels := strings.Split(channelNames, ",")
 
 	for _, channelName := range channels {
-		// Ensure the channel name starts with #
+		// Trim spaces and ensure the channel name starts with #
+		channelName = strings.TrimSpace(channelName)
 		if !strings.HasPrefix(channelName, "#") {
 			channelName = "#" + channelName
 		}
+
+		// Remove any additional parameters (like keys) from the channel name
+		channelName = strings.Fields(channelName)[0]
 
 		// Get or create the channel
 		channel, err := getOrCreateChannel(channelName)
