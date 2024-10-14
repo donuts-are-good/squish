@@ -609,7 +609,7 @@ func handleTopic(client *Client, channelName string, newTopic string) {
 	}
 
 	// Check if the client is in the channel
-	isOperator := false
+	var isOperator bool
 	err := DB.QueryRow("SELECT is_operator FROM user_channels WHERE user_id = ? AND channel_id = ?", client.ID, channel.ID).Scan(&isOperator)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -658,8 +658,11 @@ func handleTopic(client *Client, channelName string, newTopic string) {
 			continue
 		}
 		targetClient := findClientByNickname(nickname)
-		if targetClient != nil {
-			targetClient.conn.Write([]byte(fmt.Sprintf(":%s!%s@%s TOPIC %s :%s\r\n", client.Nickname, client.Username, client.Hostname, channelName, newTopic)))
+		if targetClient != nil && targetClient.conn != nil {
+			_, err := targetClient.conn.Write([]byte(fmt.Sprintf(":%s!%s@%s TOPIC %s :%s\r\n", client.Nickname, client.Username, client.Hostname, channelName, newTopic)))
+			if err != nil {
+				log.Printf("handleTopic: error sending topic change to %s: %v", nickname, err)
+			}
 		}
 	}
 
