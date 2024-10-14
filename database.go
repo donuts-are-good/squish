@@ -106,9 +106,9 @@ func getClientByNickname(nickname string) (*Client, error) {
 func updateClientInfo(client *Client) error {
 	_, err := DB.Exec(`
 		UPDATE users 
-		SET username = ?, hostname = ?, realname = ?, last_seen = ?
+		SET username = ?, hostname = ?, realname = ?, last_seen = ?, email = ?, is_identified = ?
 		WHERE id = ?
-	`, client.Username, client.Hostname, client.Realname, client.LastSeen, client.ID)
+	`, client.Username, client.Hostname, client.Realname, client.LastSeen, client.Email, client.IsIdentified, client.ID)
 	return err
 }
 
