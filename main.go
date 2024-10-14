@@ -57,6 +57,15 @@ type Channel struct {
 	CreatedAt          time.Time      `db:"created_at" json:"created_at"`
 }
 
+// Add a new struct to represent the user_channels relationship
+type UserChannel struct {
+	UserID     int64     `db:"user_id"`
+	ChannelID  int64     `db:"channel_id"`
+	IsOperator bool      `db:"is_operator"`
+	HasVoice   bool      `db:"has_voice"`
+	JoinedAt   time.Time `db:"joined_at"`
+}
+
 var (
 	DB *sqlx.DB
 )

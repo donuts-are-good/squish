@@ -600,22 +600,70 @@ func notifyChannelModeChange(client *Client, channel *Channel, modeString string
 }
 
 func handleTopic(client *Client, channelName string, newTopic string) {
+	log.Printf("handleTopic: starting for channel: %s, new topic: %s", channelName, newTopic)
 	channel := findChannel(channelName)
 	if channel == nil {
+		log.Printf("handleTopic: channel not found: %s", channelName)
 		client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :No such channel\r\n", ServerNameString, client.Nickname, channelName)))
+		return
+	}
+
+	// Check if the client is in the channel
+	isOperator := false
+	err := DB.QueryRow("SELECT is_operator FROM user_channels WHERE user_id = ? AND channel_id = ?", client.ID, channel.ID).Scan(&isOperator)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			log.Printf("handleTopic: client %s is not in channel %s", client.Nickname, channelName)
+			client.conn.Write([]byte(fmt.Sprintf(":%s 442 %s %s :You're not on that channel\r\n", ServerNameString, client.Nickname, channelName)))
+			return
+		}
+		log.Printf("handleTopic: error checking client channel status: %v", err)
+		client.conn.Write([]byte(fmt.Sprintf(":%s 500 %s :Internal server error\r\n", ServerNameString, client.Nickname)))
 		return
 	}
 
 	if newTopic == "" {
 		// Send current topic
 		client.conn.Write([]byte(fmt.Sprintf(":%s 332 %s %s :%s\r\n", ServerNameString, client.Nickname, channelName, channel.Topic)))
-	} else {
-		// Set new topic
-		channel.Topic = newTopic
-		for _, c := range channel.Clients {
-			c.conn.Write([]byte(fmt.Sprintf(":%s!%s@%s TOPIC %s :%s\r\n", client.Nickname, client.Nickname, client.conn.RemoteAddr().String(), channelName, newTopic)))
+		return
+	}
+
+	// Check if the client has permission to change the topic
+	if channel.TopicProtection && !isOperator {
+		log.Printf("handleTopic: client %s doesn't have permission to change topic in %s", client.Nickname, channelName)
+		client.conn.Write([]byte(fmt.Sprintf(":%s 482 %s %s :You're not channel operator\r\n", ServerNameString, client.Nickname, channelName)))
+		return
+	}
+
+	// Set new topic
+	_, err = DB.Exec("UPDATE channels SET topic = ? WHERE id = ?", newTopic, channel.ID)
+	if err != nil {
+		log.Printf("handleTopic: error updating topic: %v", err)
+		client.conn.Write([]byte(fmt.Sprintf(":%s 500 %s :Internal server error\r\n", ServerNameString, client.Nickname)))
+		return
+	}
+
+	// Notify all users in the channel about the topic change
+	rows, err := DB.Query("SELECT u.nickname FROM users u JOIN user_channels uc ON u.id = uc.user_id WHERE uc.channel_id = ?", channel.ID)
+	if err != nil {
+		log.Printf("handleTopic: error fetching channel users: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var nickname string
+		if err := rows.Scan(&nickname); err != nil {
+			log.Printf("handleTopic: error scanning user nickname: %v", err)
+			continue
+		}
+		targetClient := findClientByNickname(nickname)
+		if targetClient != nil {
+			targetClient.conn.Write([]byte(fmt.Sprintf(":%s!%s@%s TOPIC %s :%s\r\n", client.Nickname, client.Username, client.Hostname, channelName, newTopic)))
 		}
 	}
+
+	log.Printf("handleTopic: topic updated successfully for channel %s", channelName)
 }
 
 func handleWho(client *Client, target string) {
