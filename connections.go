@@ -73,7 +73,6 @@ func handleConnection(conn net.Conn) {
 				if len(parts) > 1 {
 					params = parts[1]
 				}
-
 				if command == "PONG" {
 					lastPingResponse = time.Now()
 					lastPingSent = time.Time{}

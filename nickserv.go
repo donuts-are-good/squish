@@ -12,11 +12,13 @@ import (
 
 // IRC numeric replies
 const (
-	RPL_NOTICE       = "NOTICE"
-	
+	RPL_NOTICE = "NOTICE"
 )
 
+const NickServNick = "NickServ"
+
 func handleNickServMessage(client *Client, message string) {
+	log.Printf("NickServ received message from %s: %s", client.Nickname, message)
 	parts := strings.Fields(message)
 	if len(parts) < 1 {
 		sendNickServHelp(client)
@@ -25,10 +27,10 @@ func handleNickServMessage(client *Client, message string) {
 
 	command := strings.ToUpper(parts[0])
 	switch command {
-	case "REGISTER":
-		handleNickServRegister(client, parts[1:])
 	case "IDENTIFY":
 		handleNickServIdentify(client, parts[1:])
+	case "REGISTER":
+		handleNickServRegister(client, parts[1:])
 	case "SET":
 		if len(parts) > 1 && strings.ToUpper(parts[1]) == "PASSWORD" {
 			handleNickServSetPassword(client, parts[2:])
@@ -40,17 +42,18 @@ func handleNickServMessage(client *Client, message string) {
 	case "GHOST":
 		handleNickServGhost(client, parts[1:])
 	default:
+		sendNickServMessage(client, fmt.Sprintf("Unknown command: %s", command))
 		sendNickServHelp(client)
 	}
 }
 
 func sendNickServHelp(client *Client) {
-	client.sendNumeric(RPL_NOTICE, "NickServ", "Available commands:")
-	client.sendNumeric(RPL_NOTICE, "NickServ", "REGISTER <password> <email> - Register your nickname")
-	client.sendNumeric(RPL_NOTICE, "NickServ", "IDENTIFY <password> - Identify with your nickname")
-	client.sendNumeric(RPL_NOTICE, "NickServ", "SET PASSWORD <new_password> - Change your password")
-	client.sendNumeric(RPL_NOTICE, "NickServ", "INFO <nickname> - Get information about a nickname")
-	client.sendNumeric(RPL_NOTICE, "NickServ", "GHOST <nickname> <password> - Disconnect an old session")
+	sendNickServMessage(client, "Available commands:")
+	sendNickServMessage(client, "REGISTER <password> <email> - Register your nickname")
+	sendNickServMessage(client, "IDENTIFY <password> - Identify with your nickname")
+	sendNickServMessage(client, "SET PASSWORD <new_password> - Change your password")
+	sendNickServMessage(client, "INFO <nickname> - Get information about a nickname")
+	sendNickServMessage(client, "GHOST <nickname> <password> - Disconnect an old session")
 }
 
 func handleNickServRegister(client *Client, args []string) {
@@ -94,40 +97,34 @@ func handleNickServRegister(client *Client, args []string) {
 func handleNickServIdentify(client *Client, args []string) {
 	log.Printf("NickServ: Handling IDENTIFY command for %s", client.Nickname)
 	if len(args) < 1 {
-		log.Printf("NickServ: Not enough parameters for IDENTIFY from %s", client.Nickname)
-		client.sendNumeric(ERR_NEEDMOREPARAMS, "IDENTIFY", "Not enough parameters")
+		sendNickServMessage(client, "Syntax: IDENTIFY <password>")
 		return
 	}
 
 	password := args[0]
-	log.Printf("NickServ: Attempting to identify %s", client.Nickname)
-
 	existingClient, err := getClientByNickname(client.Nickname)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			log.Printf("NickServ: Nickname %s is not registered", client.Nickname)
-			client.sendNumeric(ERR_NOSUCHNICK, client.Nickname, "This nickname is not registered")
+			sendNickServMessage(client, "This nickname is not registered.")
 		} else {
 			log.Printf("NickServ: Error fetching client from database: %v", err)
-			client.sendNumeric(ERR_UNKNOWNERROR, "Error identifying nickname")
+			sendNickServMessage(client, "Error identifying nickname")
 		}
 		return
 	}
 
 	if verifyPassword(existingClient.Password, password) {
-		log.Printf("NickServ: Password verified for %s", client.Nickname)
 		client.IsIdentified = true
 		client.LastSeen = time.Now()
 		err = updateClientInfo(client)
 		if err != nil {
 			log.Printf("NickServ: Error updating client info for %s: %v", client.Nickname, err)
-			client.sendNumeric(ERR_UNKNOWNERROR, "Error updating client information")
+			sendNickServMessage(client, "Error updating client information")
 			return
 		}
-		client.sendNumeric(RPL_NOTICE, "NickServ", fmt.Sprintf("You are now identified for %s", client.Nickname))
+		sendNickServMessage(client, fmt.Sprintf("You are now identified for %s", client.Nickname))
 	} else {
-		log.Printf("NickServ: Invalid password for %s", client.Nickname)
-		client.sendNumeric(ERR_PASSWDMISMATCH, "Invalid password for nickname")
+		sendNickServMessage(client, "Invalid password for nickname")
 	}
 }
 
@@ -225,5 +222,5 @@ func verifyPassword(hashedPassword, password string) bool {
 }
 
 func sendNickServMessage(client *Client, message string) {
-	client.conn.Write([]byte(fmt.Sprintf(":%s PRIVMSG %s :%s\r\n", "NickServ", client.Nickname, message)))
+	client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :%s\r\n", NickServNick, client.Nickname, message)))
 }
