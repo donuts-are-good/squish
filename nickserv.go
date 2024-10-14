@@ -132,6 +132,7 @@ func handleNickServIdentify(client *Client, args []string) {
 			notifyNicknameChange(client, oldNickname, targetNick)
 		}
 
+		client.ID = existingClient.ID // Ensure the client has the correct ID
 		client.IsIdentified = true
 		client.LastSeen = time.Now()
 		err = updateClientInfo(client)
