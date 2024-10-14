@@ -184,15 +184,6 @@ func findClientByNickname(nickname string) *Client {
 	return &client
 }
 
-func findChannel(name string) *Channel {
-	var channel Channel
-	err := DB.Get(&channel, "SELECT * FROM channels WHERE name = ?", name)
-	if err != nil {
-		return nil
-	}
-	return &channel
-}
-
 // Modify the handleNick function
 func handleNick(client *Client, nickname string) {
 	log.Printf("Handling NICK command for %s, new nickname: %s", client.conn.RemoteAddr().String(), nickname)

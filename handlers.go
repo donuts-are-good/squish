@@ -58,10 +58,11 @@ func handleList(client *Client) {
 }
 
 func handleNames(client *Client, channelName string) {
-	log.Println("handleUsers: starting")
+	log.Printf("handleNames: starting for channel: %s", channelName)
 	var users []string
 
 	if channelName == "" {
+		log.Println("handleNames: fetching all users")
 		// Get all users from the database
 		err := DB.Select(&users, "SELECT nickname FROM users")
 		if err != nil {
@@ -70,6 +71,7 @@ func handleNames(client *Client, channelName string) {
 			return
 		}
 	} else {
+		log.Printf("handleNames: fetching users for channel: %s", channelName)
 		channel := findChannel(channelName)
 		if channel != nil {
 			// Get users in the channel from the database
@@ -85,19 +87,25 @@ func handleNames(client *Client, channelName string) {
 				return
 			}
 		} else {
+			log.Printf("handleNames: channel not found: %s", channelName)
 			client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :No such channel\r\n", ServerNameString, client.Nickname, channelName)))
 			return
 		}
 	}
 
+	log.Printf("handleNames: found %d users", len(users))
 	userList := strings.Join(users, " ")
 
 	if channelName == "" {
-		client.conn.Write([]byte(fmt.Sprintf(":%s 265 %s %s\r\n", ServerNameString, client.Nickname, userList)))
+		log.Println("handleNames: sending global user list")
+		client.conn.Write([]byte(fmt.Sprintf(":%s 353 %s * * :%s\r\n", ServerNameString, client.Nickname, userList)))
+		client.conn.Write([]byte(fmt.Sprintf(":%s 366 %s * :End of /NAMES list.\r\n", ServerNameString, client.Nickname)))
 	} else {
+		log.Printf("handleNames: sending user list for channel %s", channelName)
 		client.conn.Write([]byte(fmt.Sprintf(":%s 353 %s = %s :%s\r\n", ServerNameString, client.Nickname, channelName, userList)))
 		client.conn.Write([]byte(fmt.Sprintf(":%s 366 %s %s :End of /NAMES list.\r\n", ServerNameString, client.Nickname, channelName)))
 	}
+	log.Println("handleNames: completed")
 }
 
 func handleJoin(client *Client, channelName string) {
@@ -614,4 +622,20 @@ func handleWho(client *Client, target string) {
 	log.Printf("Handling WHO command for target: %s", target)
 	// For now, just send an empty WHO reply
 	client.conn.Write([]byte(fmt.Sprintf(":%s 315 %s %s :End of WHO list\r\n", ServerNameString, client.Nickname, target)))
+}
+
+func findChannel(name string) *Channel {
+	log.Printf("findChannel: searching for channel: %s", name)
+	var channel Channel
+	err := DB.Get(&channel, "SELECT * FROM channels WHERE name = ?", name)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			log.Printf("findChannel: channel not found: %s", name)
+		} else {
+			log.Printf("findChannel: error querying database: %v", err)
+		}
+		return nil
+	}
+	log.Printf("findChannel: found channel: %s", name)
+	return &channel
 }
