@@ -50,7 +50,7 @@ func handleNickServMessage(client *Client, message string) {
 func sendNickServHelp(client *Client) {
 	sendNickServMessage(client, "Available commands:")
 	sendNickServMessage(client, "REGISTER <password> <email> - Register your nickname")
-	sendNickServMessage(client, "IDENTIFY <password> - Identify with your nickname")
+	sendNickServMessage(client, "IDENTIFY <nickname> <password> - Identify with a nickname")
 	sendNickServMessage(client, "SET PASSWORD <new_password> - Change your password")
 	sendNickServMessage(client, "INFO <nickname> - Get information about a nickname")
 	sendNickServMessage(client, "GHOST <nickname> <password> - Disconnect an old session")
@@ -91,21 +91,22 @@ func handleNickServRegister(client *Client, args []string) {
 
 	log.Printf("Nickname %s registered successfully with password hash: %s", client.Nickname, client.Password)
 	sendNickServMessage(client, fmt.Sprintf("Nickname %s registered successfully", client.Nickname))
-	sendNickServMessage(client, "You can now identify using /msg NickServ IDENTIFY <password>")
+	sendNickServMessage(client, "You can now identify using /msg NickServ IDENTIFY <nickname> <password>")
 }
 
 func handleNickServIdentify(client *Client, args []string) {
 	log.Printf("NickServ: Handling IDENTIFY command for %s", client.Nickname)
-	if len(args) < 1 {
-		sendNickServMessage(client, "Syntax: IDENTIFY <password>")
+	if len(args) < 2 {
+		sendNickServMessage(client, "Syntax: IDENTIFY <nickname> <password>")
 		return
 	}
 
-	password := args[0]
-	existingClient, err := getClientByNickname(client.Nickname)
+	targetNick, password := args[0], args[1]
+
+	existingClient, err := getClientByNickname(targetNick)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			sendNickServMessage(client, "This nickname is not registered.")
+			sendNickServMessage(client, fmt.Sprintf("The nickname %s is not registered.", targetNick))
 		} else {
 			log.Printf("NickServ: Error fetching client from database: %v", err)
 			sendNickServMessage(client, "Error identifying nickname")
@@ -113,21 +114,38 @@ func handleNickServIdentify(client *Client, args []string) {
 		return
 	}
 
-	log.Printf("Stored password hash for %s: %s", client.Nickname, existingClient.Password)
-	log.Printf("Attempting to verify password: %s", password)
+	log.Printf("Attempting to verify password for %s", targetNick)
+	log.Printf("Stored password hash: '%s'", existingClient.Password)
+	log.Printf("Supplied password: '%s'", password)
 
 	if verifyPassword(existingClient.Password, password) {
+		// If the client is using a different nickname, change it
+		if client.Nickname != targetNick {
+			oldNickname := client.Nickname
+			client.Nickname = targetNick
+			updateConnectedClientNickname(oldNickname, targetNick)
+			err := updateClientNickname(client)
+			if err != nil {
+				log.Printf("Error updating client nickname: %v", err)
+				sendNickServMessage(client, "Error updating nickname")
+				return
+			}
+			client.conn.Write([]byte(fmt.Sprintf(":%s NICK %s\r\n", oldNickname, targetNick)))
+			notifyNicknameChange(client, oldNickname, targetNick)
+		}
+
+		client.ID = existingClient.ID // Ensure the client has the correct ID
 		client.IsIdentified = true
 		client.LastSeen = time.Now()
 		err = updateClientInfo(client)
 		if err != nil {
-			log.Printf("NickServ: Error updating client info for %s: %v", client.Nickname, err)
+			log.Printf("NickServ: Error updating client info for %s: %v", targetNick, err)
 			sendNickServMessage(client, "Error updating client information")
 			return
 		}
-		sendNickServMessage(client, fmt.Sprintf("You are now identified for %s", client.Nickname))
+		sendNickServMessage(client, fmt.Sprintf("You are now identified for %s", targetNick))
 	} else {
-		log.Printf("Password verification failed for %s", client.Nickname)
+		log.Printf("Password verification failed for %s", targetNick)
 		sendNickServMessage(client, "Invalid password for nickname")
 	}
 }
@@ -221,11 +239,17 @@ func (client *Client) sendNumeric(numeric string, params ...string) {
 }
 
 func verifyPassword(hashedPassword, password string) bool {
+	log.Printf("Comparing hashedPassword: '%s' with password: '%s'", hashedPassword, password)
+	if hashedPassword == "" {
+		log.Printf("Error: Stored hashed password is empty")
+		return false
+	}
 	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
 	if err != nil {
 		log.Printf("Password verification failed: %v", err)
+		return false
 	}
-	return err == nil
+	return true
 }
 
 func sendNickServMessage(client *Client, message string) {
