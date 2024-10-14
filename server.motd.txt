@@ -27,6 +27,21 @@ Implemented Commands:
   /PING <server> - Ping the server (automatically handled by most clients)
   /PONG <server> - Reply to a server PING (automatically handled by most clients)
 
+Supported Modes:
+  User Modes:
+    +i - Set yourself as invisible
+    +o - Operator status (can only be set by the OPER command)
+
+  Channel Modes:
+    +n - No external messages (only channel members can send messages)
+    +t - Only channel operators can change the topic
+    +m - Moderated channel (only voiced users and operators can speak)
+    +i - Invite-only channel
+    +k <key> - Set a channel key (password)
+    +l <limit> - Set a user limit for the channel
+    +o <nickname> - Give channel operator status to a user
+    +v <nickname> - Give voice status to a user
+
 NickServ Commands:
   /MSG NickServ REGISTER <password> <email> - Register your nickname
   /MSG NickServ IDENTIFY <nickname> <password> - Identify with your registered nickname
