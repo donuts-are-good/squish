@@ -4,38 +4,22 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"math/rand"
-	"net"
 	"strconv"
 	"strings"
 	"time"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
-func handleDisconnect(client *Client, err error) {
-	var quitMessage string
-	switch e := err.(type) {
-	case net.Error:
-		if e.Timeout() {
-			quitMessage = "Ping timeout"
-			log.Println("con: timeout:", client.conn.RemoteAddr().String())
-		} else {
-			quitMessage = "Connection error"
-			log.Println("con: disconnect:", client.conn.RemoteAddr().String())
-		}
-	default:
-		quitMessage = "Client quit"
-		log.Println("con: disconnect:", client.conn.RemoteAddr().String())
+func handlePrivmsg(client *Client, target string, message string) {
+	if strings.EqualFold(target, "ChanServ") {
+		log.Printf("ChanServ command received from %s: %s", client.Nickname, message)
+		ChanServ.HandleMessage(client, strings.TrimPrefix(message, ":"))
+		return
 	}
 
-	handleQuit(client, quitMessage)
-	removeClient(client)
-}
-
-func handlePrivmsg(client *Client, target string, message string) {
 	if strings.EqualFold(target, "NickServ") {
-		handleNickServMessage(client, message)
+		log.Printf("NickServ command received from %s: %s", client.Nickname, message)
+		handleNickServMessage(client, strings.TrimPrefix(message, ":"))
+		// Remove the acknowledgment message
 		return
 	}
 
@@ -77,87 +61,212 @@ func handleList(client *Client) {
 }
 
 func handleNames(client *Client, channelName string) {
-	log.Println("handleUsers: starting")
+	log.Printf("handleNames: starting for channel: %s", channelName)
 	var users []string
 
-	mu.Lock()
-	defer mu.Unlock()
-
 	if channelName == "" {
-		for _, c := range clients {
-			users = append(users, c.Nickname)
+		log.Println("handleNames: fetching all users")
+		// Get all users from the database
+		err := DB.Select(&users, "SELECT nickname FROM users")
+		if err != nil {
+			log.Printf("Error getting all users: %v", err)
+			client.conn.Write([]byte(fmt.Sprintf(":%s 366 %s * :Error listing users\r\n", ServerNameString, client.Nickname)))
+			return
 		}
 	} else {
+		log.Printf("handleNames: fetching users for channel: %s", channelName)
 		channel := findChannel(channelName)
 		if channel != nil {
-			for _, c := range channel.Clients {
-				users = append(users, c.Nickname)
+			// Get users in the channel from the database
+			err := DB.Select(&users, `
+				SELECT u.nickname 
+				FROM users u 
+				JOIN user_channels uc ON u.id = uc.user_id 
+				WHERE uc.channel_id = ?
+			`, channel.ID)
+			if err != nil {
+				log.Printf("Error getting users for channel %s: %v", channelName, err)
+				client.conn.Write([]byte(fmt.Sprintf(":%s 366 %s %s :Error listing users\r\n", ServerNameString, client.Nickname, channelName)))
+				return
 			}
 		} else {
-			client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s No such channel\r\n", ServerNameString, client.Nickname, channelName)))
+			log.Printf("handleNames: channel not found: %s", channelName)
+			client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :No such channel\r\n", ServerNameString, client.Nickname, channelName)))
 			return
 		}
 	}
 
+	log.Printf("handleNames: found %d users", len(users))
 	userList := strings.Join(users, " ")
 
 	if channelName == "" {
-		client.conn.Write([]byte(fmt.Sprintf(":%s 265 %s %s\r\n", ServerNameString, client.Nickname, userList)))
+		log.Println("handleNames: sending global user list")
+		client.conn.Write([]byte(fmt.Sprintf(":%s 353 %s * * :%s\r\n", ServerNameString, client.Nickname, userList)))
+		client.conn.Write([]byte(fmt.Sprintf(":%s 366 %s * :End of /NAMES list.\r\n", ServerNameString, client.Nickname)))
 	} else {
+		log.Printf("handleNames: sending user list for channel %s", channelName)
 		client.conn.Write([]byte(fmt.Sprintf(":%s 353 %s = %s :%s\r\n", ServerNameString, client.Nickname, channelName, userList)))
-		client.conn.Write([]byte(fmt.Sprintf(":%s 366 %s %s End of /NAMES list.\r\n", ServerNameString, client.Nickname, channelName)))
+		client.conn.Write([]byte(fmt.Sprintf(":%s 366 %s %s :End of /NAMES list.\r\n", ServerNameString, client.Nickname, channelName)))
+	}
+	log.Println("handleNames: completed")
+}
+
+func handleJoin(client *Client, channelNames string) {
+	log.Printf("Handling JOIN command for client %s, channels: %s", client.Nickname, channelNames)
+
+	// Split the channel names and keys
+	parts := strings.SplitN(channelNames, " ", 2)
+	channelList := strings.Split(parts[0], ",")
+	keys := []string{}
+	if len(parts) > 1 {
+		keys = strings.Split(parts[1], ",")
+	}
+
+	log.Printf("Channels after split: %v, Keys: %v", channelList, keys)
+
+	// Validate and filter channel names
+	var validChannels []string
+	for _, channelName := range channelList {
+		channelName = strings.TrimSpace(channelName)
+		if channelName == "" || strings.EqualFold(channelName, "na") {
+			log.Printf("Skipping invalid channel name: '%s'", channelName)
+			continue
+		}
+		if !strings.HasPrefix(channelName, "#") {
+			channelName = "#" + channelName
+		}
+		validChannels = append(validChannels, channelName)
+	}
+
+	// Remove the last element if it's "na"
+	if len(validChannels) > 0 && strings.EqualFold(validChannels[len(validChannels)-1], "#na") {
+		validChannels = validChannels[:len(validChannels)-1]
+	}
+
+	log.Printf("Valid channels: %v", validChannels)
+
+	for i, channelName := range validChannels {
+		// Get the key for this channel, if provided
+		var key string
+		if i < len(keys) {
+			key = keys[i]
+		}
+
+		// Get or create the channel
+		channel, err := getOrCreateChannel(channelName)
+		if err != nil {
+			log.Printf("Error getting or creating channel %s: %v", channelName, err)
+			client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :Failed to join channel\r\n", ServerNameString, client.Nickname, channelName)))
+			continue
+		}
+
+		// Check if the channel requires a key
+		if channel.Key.Valid && channel.Key.String != "" && key != channel.Key.String {
+			client.conn.Write([]byte(fmt.Sprintf(":%s 475 %s %s :Cannot join channel (+k) - bad key\r\n", ServerNameString, client.Nickname, channelName)))
+			continue
+		}
+
+		// Check if the client is already in the channel
+		isAlreadyInChannel, err := isClientInChannel(client, channel)
+		if err != nil {
+			log.Printf("Error checking if client is in channel: %v", err)
+			client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :Failed to join channel\r\n", ServerNameString, client.Nickname, channelName)))
+			continue
+		}
+
+		if !isAlreadyInChannel {
+			// Check if the channel is new (no users yet)
+			userCount, err := getChannelUserCount(channel.ID)
+			if err != nil {
+				log.Printf("Error getting channel user count: %v", err)
+				client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :Failed to join channel\r\n", ServerNameString, client.Nickname, channelName)))
+				continue
+			}
+
+			// If the channel is new, add the client as an operator
+			isOperator := userCount == 0
+
+			// Add the client to the channel in the database
+			err = addClientToChannel(client, channel, isOperator)
+			if err != nil {
+				log.Printf("Error adding client %s to channel %s: %v", client.Nickname, channelName, err)
+				client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :Failed to join channel\r\n", ServerNameString, client.Nickname, channelName)))
+				continue
+			}
+
+			// Add the channel to the client's list of channels
+			client.Channels = append(client.Channels, channel)
+
+			// Send JOIN message to the joining client
+			joinMessage := fmt.Sprintf(":%s!%s@%s JOIN %s\r\n", client.Nickname, client.Username, client.Hostname, channelName)
+			client.conn.Write([]byte(joinMessage))
+
+			// Send JOIN message to all other clients in the channel
+			broadcastToChannel(channel, joinMessage)
+
+			// If this is a new channel, inform the user about registration
+			if !channel.IsRegistered {
+				client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :This channel is not registered. To register it, use /MSG ChanServ REGISTER %s\r\n", ServerNameString, client.Nickname, channelName)))
+			}
+
+			// If the client is now an operator, send them a notice
+			if isOperator {
+				client.conn.Write([]byte(fmt.Sprintf(":%s MODE %s +o %s\r\n", ServerNameString, channelName, client.Nickname)))
+				client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :You are now channel operator of %s\r\n", ServerNameString, client.Nickname, channelName)))
+			}
+		}
+
+		// Send the channel topic to the joining client
+		if channel.Topic != "" {
+			client.conn.Write([]byte(fmt.Sprintf(":%s 332 %s %s :%s\r\n", ServerNameString, client.Nickname, channelName, channel.Topic)))
+			client.conn.Write([]byte(fmt.Sprintf(":%s 333 %s %s %s %d\r\n", ServerNameString, client.Nickname, channelName, "Unknown", channel.CreatedAt.Unix())))
+		}
+
+		// Send names list
+		sendNamesListToClient(client, channel)
+	}
+
+	log.Printf("Finished processing JOIN command for client %s", client.Nickname)
+}
+
+// Helper function to broadcast a message to all clients in a channel
+func broadcastToChannel(channel *Channel, message string) {
+	channelClients, err := getClientsInChannel(channel)
+	if err != nil {
+		log.Printf("Error getting clients in channel %s: %v", channel.Name, err)
+		return
+	}
+	for _, c := range channelClients {
+		if c.conn != nil {
+			c.conn.Write([]byte(message))
+		}
 	}
 }
 
-func handleJoin(client *Client, channelName string) {
-	if !strings.HasPrefix(channelName, "#") {
-		channelName = "#" + channelName
-	}
-
-	channel, err := getOrCreateChannel(channelName)
+func sendNamesListToClient(client *Client, channel *Channel) {
+	channelClients, err := getClientsInChannel(channel)
 	if err != nil {
-		log.Printf("Error getting or creating channel: %v", err)
-		client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :Failed to join channel\r\n", ServerNameString, client.Nickname, channelName)))
+		log.Printf("Error getting clients in channel %s: %v", channel.Name, err)
 		return
 	}
 
-	err = addClientToChannel(client, channel)
-	if err != nil {
-		log.Printf("Error adding client to channel: %v", err)
-		client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :Failed to join channel\r\n", ServerNameString, client.Nickname, channelName)))
-		return
-	}
-
-	clients, err := getClientsInChannel(channel)
-	if err != nil {
-		log.Printf("Error getting clients in channel: %v", err)
-	} else {
-		channel.Clients = clients
-	}
-
-	mu.Lock()
-	channel.Clients = append(channel.Clients, client)
-	client.Channels = append(client.Channels, channel)
-	mu.Unlock()
-
-	for _, c := range channel.Clients {
-		c.conn.Write([]byte(fmt.Sprintf(":%s JOIN %s\r\n", client.Nickname, channel.Name)))
-	}
-
-	// Send channel topic
-	if channel.Topic != "" {
-		client.conn.Write([]byte(fmt.Sprintf(":%s 332 %s %s :%s\r\n", ServerNameString, client.Nickname, channel.Name, channel.Topic)))
-	} else {
-		client.conn.Write([]byte(fmt.Sprintf(":%s 331 %s %s :No topic is set\r\n", ServerNameString, client.Nickname, channel.Name)))
-	}
-
-	// Send names list
 	var nicknames []string
-	for _, c := range channel.Clients {
+	for _, c := range channelClients {
 		nicknames = append(nicknames, c.Nickname)
 	}
-	nicknameList := strings.Join(nicknames, " ")
-	client.conn.Write([]byte(fmt.Sprintf(":%s 353 %s = %s :%s\r\n", ServerNameString, client.Nickname, channel.Name, nicknameList)))
+
+	// Send names list in chunks of 10 nicknames
+	for i := 0; i < len(nicknames); i += 10 {
+		end := i + 10
+		if end > len(nicknames) {
+			end = len(nicknames)
+		}
+		chunk := nicknames[i:end]
+		nicknameList := strings.Join(chunk, " ")
+		client.conn.Write([]byte(fmt.Sprintf(":%s 353 %s = %s :%s\r\n", ServerNameString, client.Nickname, channel.Name, nicknameList)))
+	}
+
+	// Send end of names list
 	client.conn.Write([]byte(fmt.Sprintf(":%s 366 %s %s :End of /NAMES list.\r\n", ServerNameString, client.Nickname, channel.Name)))
 }
 
@@ -220,11 +329,22 @@ func handlePart(client *Client, channelName string) {
 		log.Printf("Error removing client from channel: %v", err)
 	}
 
-	client.conn.Write([]byte(fmt.Sprintf(":%s!%s@%s PART %s\r\n", client.Nickname, client.Nickname, client.conn.RemoteAddr().String(), channelName)))
+	// Remove the channel from the client's list of channels
+	for i, ch := range client.Channels {
+		if ch.Name == channelName {
+			client.Channels = append(client.Channels[:i], client.Channels[i+1:]...)
+			break
+		}
+	}
+
+	partMessage := fmt.Sprintf(":%s!%s@%s PART %s\r\n", client.Nickname, client.Username, client.Hostname, channelName)
+	client.conn.Write([]byte(partMessage))
 
 	// Notify other users in the channel
 	for _, c := range channel.Clients {
-		c.conn.Write([]byte(fmt.Sprintf(":%s!%s@%s PART %s\r\n", client.Nickname, client.Nickname, client.conn.RemoteAddr().String(), channelName)))
+		if c != client {
+			c.conn.Write([]byte(partMessage))
+		}
 	}
 }
 
@@ -241,6 +361,7 @@ func handleQuit(client *Client, message string) {
 	}
 
 	removeClient(client)
+	removeConnectedClient(client.Nickname)
 	client.conn.Close()
 }
 
@@ -261,20 +382,23 @@ func handleUser(client *Client, username, hostname, realname string) {
 }
 
 func completeRegistration(client *Client) {
-	// Generate a random password
-	password := generateRandomPassword(10)
-
-	// Hash the password
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		log.Printf("Error hashing password: %v", err)
-		client.conn.Write([]byte(fmt.Sprintf(":%s 451 %s :Failed to register (password hashing error)\r\n", ServerNameString, client.Nickname)))
-		return
+	// Check if the nickname already exists in the database
+	existingClient, err := getClientByNickname(client.Nickname)
+	if err == nil && existingClient != nil {
+		// Nickname exists, update the existing record
+		client.ID = existingClient.ID
+		client.CreatedAt = existingClient.CreatedAt
+		client.LastSeen = time.Now()
+		err = updateClientInfo(client)
+	} else {
+		// New nickname, create a new record
+		client.CreatedAt = time.Now()
+		client.LastSeen = time.Now()
+		err = createClient(client)
 	}
 
-	err = createOrUpdateClient(client, string(hashedPassword))
 	if err != nil {
-		log.Printf("Error updating client information: %v", err)
+		log.Printf("Error registering client: %v", err)
 		client.conn.Write([]byte(fmt.Sprintf(":%s 451 %s :Failed to register (database error)\r\n", ServerNameString, client.Nickname)))
 		return
 	}
@@ -282,36 +406,12 @@ func completeRegistration(client *Client) {
 	log.Printf("User registration complete for %s", client.Nickname)
 	sendWelcomeMessages(client)
 
-	// Send the password and instructions to the user
-	client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :Your account username: '%s' nickname: '%s' has been registered with the password: %s\r\n", ServerNameString, client.Nickname, client.Username, client.Nickname, password)))
-	client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :To change your password, use the command: /msg NickServ SET PASSWORD <new_password>\r\n", ServerNameString, client.Nickname)))
-}
+	// Add the client to the connected clients list
+	addConnectedClient(client)
 
-func createOrUpdateClient(client *Client, password string) error {
-	var err error
-	existingClient, err := getClientByNickname(client.Nickname)
-	if err == sql.ErrNoRows {
-		// New client, create a new database entry
-		err = createClient(client)
-	} else if err == nil {
-		// Existing client, update the database entry
-		client.ID = existingClient.ID
-		client.Password = password // Add this line
-		err = updateClientInfo(client)
-	} else {
-		return err
-	}
-	return err
-}
-
-func generateRandomPassword(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
-	seededRand := rand.New(rand.NewSource(time.Now().UnixNano()))
-	password := make([]byte, length)
-	for i := range password {
-		password[i] = charset[seededRand.Intn(len(charset))]
-	}
-	return string(password)
+	// Send instructions to the user
+	client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :To register your nickname, use /msg NickServ REGISTER <password> <email>\r\n", ServerNameString, client.Nickname)))
+	client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :After registering, you can identify using /msg NickServ IDENTIFY <password>\r\n", ServerNameString, client.Nickname)))
 }
 
 func handleMode(client *Client, target string, modes string) {
@@ -561,40 +661,302 @@ func notifyChannelModeChange(client *Client, channel *Channel, modeString string
 }
 
 func handleTopic(client *Client, channelName string, newTopic string) {
+	log.Printf("handleTopic: starting for channel: %s, new topic: %s", channelName, newTopic)
 	channel := findChannel(channelName)
 	if channel == nil {
+		log.Printf("handleTopic: channel not found: %s", channelName)
 		client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :No such channel\r\n", ServerNameString, client.Nickname, channelName)))
+		return
+	}
+
+	// Check if the client is in the channel
+	var isOperator bool
+	err := DB.QueryRow("SELECT is_operator FROM user_channels WHERE user_id = ? AND channel_id = ?", client.ID, channel.ID).Scan(&isOperator)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			log.Printf("handleTopic: client %s is not in channel %s", client.Nickname, channelName)
+			client.conn.Write([]byte(fmt.Sprintf(":%s 442 %s %s :You're not on that channel\r\n", ServerNameString, client.Nickname, channelName)))
+			return
+		}
+		log.Printf("handleTopic: error checking client channel status: %v", err)
+		client.conn.Write([]byte(fmt.Sprintf(":%s 500 %s :Internal server error\r\n", ServerNameString, client.Nickname)))
 		return
 	}
 
 	if newTopic == "" {
 		// Send current topic
 		client.conn.Write([]byte(fmt.Sprintf(":%s 332 %s %s :%s\r\n", ServerNameString, client.Nickname, channelName, channel.Topic)))
-	} else {
-		// Set new topic
-		channel.Topic = newTopic
-		for _, c := range channel.Clients {
-			c.conn.Write([]byte(fmt.Sprintf(":%s!%s@%s TOPIC %s :%s\r\n", client.Nickname, client.Nickname, client.conn.RemoteAddr().String(), channelName, newTopic)))
+		client.conn.Write([]byte(fmt.Sprintf(":%s 333 %s %s %s %d\r\n", ServerNameString, client.Nickname, channelName, "Unknown", time.Now().Unix())))
+		return
+	}
+
+	// Check if the client has permission to change the topic
+	if channel.TopicProtection && !isOperator {
+		log.Printf("handleTopic: client %s doesn't have permission to change topic in %s", client.Nickname, channelName)
+		client.conn.Write([]byte(fmt.Sprintf(":%s 482 %s %s :You're not channel operator\r\n", ServerNameString, client.Nickname, channelName)))
+		return
+	}
+
+	// Set new topic
+	_, err = DB.Exec("UPDATE channels SET topic = ? WHERE id = ?", newTopic, channel.ID)
+	if err != nil {
+		log.Printf("handleTopic: error updating topic: %v", err)
+		client.conn.Write([]byte(fmt.Sprintf(":%s 500 %s :Internal server error\r\n", ServerNameString, client.Nickname)))
+		return
+	}
+
+	// Update the channel object
+	channel.Topic = newTopic
+
+	// Prepare the topic change messages
+	topicChangeMessage := fmt.Sprintf(":%s!%s@%s TOPIC %s :%s\r\n", client.Nickname, client.Username, client.Hostname, channelName, newTopic)
+
+	// Broadcast the topic change to all users in the channel
+	rows, err := DB.Query("SELECT u.nickname FROM users u JOIN user_channels uc ON u.id = uc.user_id WHERE uc.channel_id = ?", channel.ID)
+	if err != nil {
+		log.Printf("handleTopic: error fetching channel users: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var nickname string
+		if err := rows.Scan(&nickname); err != nil {
+			log.Printf("handleTopic: error scanning user nickname: %v", err)
+			continue
+		}
+		targetClient := findClientByNickname(nickname)
+		if targetClient != nil && targetClient.conn != nil {
+			log.Printf("handleTopic: sending topic change to %s", nickname)
+			targetClient.conn.Write([]byte(topicChangeMessage))
+			targetClient.conn.Write([]byte(fmt.Sprintf(":%s 332 %s %s :%s\r\n", ServerNameString, targetClient.Nickname, channelName, newTopic)))
+			targetClient.conn.Write([]byte(fmt.Sprintf(":%s 333 %s %s %s %d\r\n", ServerNameString, targetClient.Nickname, channelName, client.Nickname, time.Now().Unix())))
 		}
 	}
+
+	log.Printf("handleTopic: topic updated successfully for channel %s", channelName)
 }
+
+func findChannel(name string) *Channel {
+	log.Printf("findChannel: searching for channel: %s", name)
+	var channel Channel
+	err := DB.Get(&channel, "SELECT * FROM channels WHERE name = ?", name)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			log.Printf("findChannel: channel not found: %s", name)
+		} else {
+			log.Printf("findChannel: error querying database: %v", err)
+		}
+		return nil
+	}
+	log.Printf("findChannel: found channel: %s", name)
+	return &channel
+}
+
+// Add these new functions to the handlers.go file
 
 func handleWho(client *Client, target string) {
 	log.Printf("Handling WHO command for target: %s", target)
-	// For now, just send an empty WHO reply
-	client.conn.Write([]byte(fmt.Sprintf(":%s 315 %s %s :End of WHO list\r\n", ServerNameString, client.Nickname, target)))
+
+	var users []*Client
+	var err error
+
+	if strings.HasPrefix(target, "#") {
+		// WHO for a channel
+		channel, err := getChannel(target)
+		if err != nil {
+			log.Printf("Error getting channel %s: %v", target, err)
+			client.sendNumeric(ERR_NOSUCHCHANNEL, target, "No such channel")
+			return
+		}
+		users, err = getClientsInChannel(channel)
+		if err != nil {
+			log.Printf("Error getting clients in channel %s: %v", target, err)
+			client.sendNumeric(ERR_UNKNOWNERROR, "Error processing WHO command")
+			return
+		}
+	} else if target == "" {
+		// WHO for all visible users
+		users, err = getAllVisibleClients()
+	} else {
+		// WHO for a specific user or mask
+		users, err = getClientsByMask(target)
+	}
+
+	if err != nil {
+		log.Printf("Error processing WHO command: %v", err)
+		client.sendNumeric(ERR_UNKNOWNERROR, "Error processing WHO command")
+		return
+	}
+
+	for _, user := range users {
+		sendWhoReply(client, user, target)
+	}
+
+	client.sendNumeric(RPL_ENDOFWHO, target, "End of WHO list")
 }
 
-// Add these new functions to handlers.go
+func sendWhoReply(client *Client, target *Client, channelName string) {
+	flags := "H" // Here
+	if target.IsOperator {
+		flags += "*"
+	}
+	if target.Invisible {
+		flags = "G" // Gone (invisible)
+	}
 
-func getAllChannels() ([]*Channel, error) {
+	client.sendNumeric(RPL_WHOREPLY,
+		channelName,
+		target.Username,
+		target.Hostname,
+		ServerNameString,
+		target.Nickname,
+		flags,
+		fmt.Sprintf("0 %s", target.Realname))
+}
+
+func handleWhois(client *Client, target string) {
+	log.Printf("Handling WHOIS command for target: %s", target)
+
+	targetClient, err := getClientByNickname(target)
+	if err != nil {
+		client.sendNumeric(ERR_NOSUCHNICK, target, "No such nick/channel")
+		return
+	}
+
+	// Send WHOIS information
+	client.sendNumeric(RPL_WHOISUSER, targetClient.Nickname, targetClient.Username, targetClient.Hostname, "*", targetClient.Realname)
+
+	// Send channels the user is in
+	channels, err := getChannelsForUser(targetClient)
+	if err == nil && len(channels) > 0 {
+		var channelList []string
+		for _, channel := range channels {
+			prefix := ""
+			if isChannelOperator(targetClient, channel) {
+				prefix = "@"
+			} else if hasChannelVoice(targetClient, channel) {
+				prefix = "+"
+			}
+			channelList = append(channelList, prefix+channel.Name)
+		}
+		client.sendNumeric(RPL_WHOISCHANNELS, targetClient.Nickname, strings.Join(channelList, " "))
+	}
+
+	// Send server info
+	client.sendNumeric(RPL_WHOISSERVER, targetClient.Nickname, ServerNameString, "SquishIRC Server")
+
+	// Send additional info
+	if targetClient.IsOperator {
+		client.sendNumeric(RPL_WHOISOPERATOR, targetClient.Nickname, "is an IRC operator")
+	}
+
+	// Fix: Convert seconds to int64
+	idleSeconds := int64(time.Since(targetClient.LastSeen).Seconds())
+	client.sendNumeric(RPL_WHOISIDLE, targetClient.Nickname, fmt.Sprintf("%d", idleSeconds), fmt.Sprintf("%d", targetClient.CreatedAt.Unix()), "seconds idle, signon time")
+
+	// End of WHOIS
+	client.sendNumeric(RPL_ENDOFWHOIS, targetClient.Nickname, "End of WHOIS list")
+}
+
+// Add these helper functions
+
+func getAllVisibleClients() ([]*Client, error) {
+	var clients []*Client
+	err := DB.Select(&clients, "SELECT * FROM users WHERE invisible = 0")
+	return clients, err
+}
+
+func getClientsByMask(mask string) ([]*Client, error) {
+	mask = strings.ReplaceAll(mask, "*", "%")
+	var clients []*Client
+	query := `
+		SELECT id, nickname, username, 
+			   COALESCE(hostname, '') as hostname, 
+			   COALESCE(realname, '') as realname, 
+			   COALESCE(password, '') as password, 
+			   invisible, is_operator, has_voice, created_at, 
+			   is_identified, last_seen, 
+			   COALESCE(email, '') as email
+		FROM users 
+		WHERE nickname LIKE ? OR username LIKE ? OR hostname LIKE ?
+	`
+	err := DB.Select(&clients, query, mask, mask, mask)
+	return clients, err
+}
+
+func getChannelsForUser(client *Client) ([]*Channel, error) {
 	var channels []*Channel
-	err := DB.Select(&channels, "SELECT * FROM channels")
+	err := DB.Select(&channels, `
+		SELECT c.* 
+		FROM channels c
+		JOIN user_channels uc ON c.id = uc.channel_id
+		WHERE uc.user_id = ?
+	`, client.ID)
 	return channels, err
 }
 
-func getChannelUserCount(channelID int64) (int, error) {
-	var count int
-	err := DB.Get(&count, "SELECT COUNT(*) FROM user_channels WHERE channel_id = ?", channelID)
-	return count, err
+func isChannelOperator(client *Client, channel *Channel) bool {
+	var isOperator bool
+	err := DB.QueryRow("SELECT is_operator FROM user_channels WHERE user_id = ? AND channel_id = ?", client.ID, channel.ID).Scan(&isOperator)
+	return err == nil && isOperator
+}
+
+func hasChannelVoice(client *Client, channel *Channel) bool {
+	var hasVoice bool
+	err := DB.QueryRow("SELECT has_voice FROM user_channels WHERE user_id = ? AND channel_id = ?", client.ID, channel.ID).Scan(&hasVoice)
+	return err == nil && hasVoice
+}
+
+func handleNick(client *Client, nickname string) {
+	log.Printf("Handling NICK command for %s, new nickname: %s", client.conn.RemoteAddr().String(), nickname)
+	if len(nickname) > 50 {
+		log.Printf("Nickname too long: %s", nickname)
+		client.conn.Write([]byte(fmt.Sprintf(":%s 432 * %s :Erroneous nickname\r\n", ServerNameString, nickname)))
+		return
+	}
+
+	// Check if the nickname is already in use by an online user
+	existingOnlineClient := findClientByNickname(nickname)
+	if existingOnlineClient != nil && existingOnlineClient != client {
+		client.conn.Write([]byte(fmt.Sprintf(":%s 433 * %s :Nickname is already in use\r\n", ServerNameString, nickname)))
+		return
+	}
+
+	// Check if the nickname is registered
+	existingRegisteredClient, err := getClientByNickname(nickname)
+	if err == nil && existingRegisteredClient != nil && existingRegisteredClient.Password != "" {
+		// Nickname is registered
+		if !client.IsIdentified || client.Nickname != nickname {
+			// Client is not identified for this nickname
+			client.conn.Write([]byte(fmt.Sprintf(":%s 433 * %s :Nickname is registered. Use /msg NickServ IDENTIFY password to use this nick.\r\n", ServerNameString, nickname)))
+			return
+		}
+	}
+
+	oldNickname := client.Nickname
+	client.Nickname = nickname
+
+	// Update the connectedClients map
+	updateConnectedClientNickname(oldNickname, nickname)
+
+	// Update the nickname in the database if the client is already registered
+	if client.ID != 0 {
+		err := updateClientNickname(client)
+		if err != nil {
+			log.Printf("Error updating client nickname in database: %v", err)
+			client.Nickname = oldNickname
+			client.conn.Write([]byte(fmt.Sprintf(":%s 432 %s :Nickname change failed\r\n", ServerNameString, nickname)))
+			return
+		}
+	}
+
+	// Notify the client and other users about the nickname change
+	client.conn.Write([]byte(fmt.Sprintf(":%s NICK %s\r\n", oldNickname, nickname)))
+	notifyNicknameChange(client, oldNickname, nickname)
+
+	// Check if we have both NICK and USER info
+	if client.Username != "" && client.ID == 0 {
+		completeRegistration(client)
+	}
 }

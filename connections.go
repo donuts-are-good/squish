@@ -10,20 +10,18 @@ import (
 )
 
 func handleConnection(conn net.Conn) {
+	client := &Client{conn: conn, Nickname: ""}
+
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("Recovered from panic in handleConnection: %v", r)
 		}
 		log.Printf("Connection closed for %s", conn.RemoteAddr().String())
+		removeConnectedClient(client.Nickname)
 		conn.Close()
 	}()
 
-	client := &Client{conn: conn, Nickname: ""}
 	reader := bufio.NewReader(conn)
-
-	mu.Lock()
-	clients = append(clients, client)
-	mu.Unlock()
 
 	log.Printf("New connection from %s", conn.RemoteAddr().String())
 
@@ -34,21 +32,23 @@ func handleConnection(conn net.Conn) {
 		return
 	}
 
-	pingTicker := time.NewTicker(1 * time.Minute)
+	pingTicker := time.NewTicker(30 * time.Second)
 	defer pingTicker.Stop()
 
 	lastPingResponse := time.Now()
+	var lastPingSent time.Time
 
 	log.Printf("Starting main loop for %s", conn.RemoteAddr().String())
 	for {
 		select {
 		case <-pingTicker.C:
-			if time.Since(lastPingResponse) > 2*time.Minute {
+			if time.Since(lastPingResponse) > 60*time.Second && !lastPingSent.IsZero() {
 				log.Printf("Ping timeout for %s", conn.RemoteAddr().String())
 				handleDisconnect(client, fmt.Errorf("ping timeout"))
 				return
 			}
 			log.Printf("Sending PING to %s", conn.RemoteAddr().String())
+			lastPingSent = time.Now()
 			_, err := conn.Write([]byte(fmt.Sprintf("PING :%s\r\n", ServerNameString)))
 			if err != nil {
 				log.Printf("Error sending PING: %v", err)
@@ -65,21 +65,23 @@ func handleConnection(conn net.Conn) {
 				return
 			}
 
-			lastPingResponse = time.Now()
-
 			log.Printf("Received message from %s: %s", conn.RemoteAddr().String(), strings.TrimSpace(message))
 			message = strings.Trim(message, "\r\n")
 			parts := strings.SplitN(message, " ", 2)
 
-			if len(parts) > 1 {
-				command, params := parts[0], parts[1]
-				if commandParser(client, command, params) {
-					log.Printf("Client %s requested disconnect", conn.RemoteAddr().String())
-					return
+			if len(parts) > 0 {
+				command := strings.ToUpper(parts[0])
+				params := ""
+				if len(parts) > 1 {
+					params = parts[1]
 				}
-			} else if len(parts) == 1 {
-				command := parts[0]
-				if commandParser(client, command, "") {
+				if command == "PONG" {
+					lastPingResponse = time.Now()
+					lastPingSent = time.Time{}
+					continue
+				}
+
+				if commandParser(client, command, params) {
 					log.Printf("Client %s requested disconnect", conn.RemoteAddr().String())
 					return
 				}
@@ -89,12 +91,9 @@ func handleConnection(conn net.Conn) {
 }
 
 func commandParser(client *Client, command, params string) bool {
-	command = strings.ToUpper(command) // Convert command to uppercase
 	switch command {
 	case "PING":
 		client.conn.Write([]byte(fmt.Sprintf("PONG %s\r\n", params)))
-	case "PONG":
-		log.Println("PONG!")
 	case "NICK":
 		log.Println("command: nick")
 		sanitizedNickname := sanitizeString(params)
@@ -103,7 +102,7 @@ func commandParser(client *Client, command, params string) bool {
 		log.Println("command: user")
 		userParts := strings.SplitN(params, " ", 4)
 		if len(userParts) == 4 {
-			handleUser(client, userParts[0], userParts[1], userParts[2])
+			handleUser(client, userParts[0], userParts[1], userParts[3])
 		}
 	case "NAMES":
 		log.Println("command: names")
@@ -114,10 +113,8 @@ func commandParser(client *Client, command, params string) bool {
 		}
 		handleNames(client, channelName)
 	case "JOIN":
-		log.Println("command: join")
-		channelName := strings.Split(params, " ")[0] // Take only the first parameter
-		sanitizedChannelName := sanitizeString(channelName)
-		handleJoin(client, sanitizedChannelName)
+		log.Printf("Received JOIN command: %s", params)
+		handleJoin(client, params)
 	case "PART":
 		log.Println("command: part")
 		sanitizedChannelName := sanitizeString(params)
@@ -134,7 +131,22 @@ func commandParser(client *Client, command, params string) bool {
 		targetAndMessage := strings.SplitN(params, " ", 2)
 		if len(targetAndMessage) > 1 {
 			target, message := targetAndMessage[0], targetAndMessage[1]
-			handlePrivmsg(client, target, message)
+			if strings.EqualFold(target, "NickServ") {
+				log.Printf("NickServ command received from %s: %s", client.Nickname, message)
+				handleNickServMessage(client, strings.TrimPrefix(message, ":"))
+				// Send an acknowledgment to the client
+				client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :NickServ command processed\r\n", ServerNameString, client.Nickname)))
+			} else if strings.EqualFold(target, "ChanServ") {
+				log.Printf("ChanServ command received from %s: %s", client.Nickname, message)
+				ChanServ.HandleMessage(client, strings.TrimPrefix(message, ":"))
+				// Send an acknowledgment to the client
+				client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :ChanServ command processed\r\n", ServerNameString, client.Nickname)))
+			} else {
+				handlePrivmsg(client, target, message)
+			}
+		} else {
+			log.Printf("Invalid PRIVMSG format from %s: %s", client.Nickname, params)
+			client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :Invalid PRIVMSG format\r\n", ServerNameString, client.Nickname)))
 		}
 	case "MODE":
 		log.Println("command: mode")
@@ -158,9 +170,51 @@ func commandParser(client *Client, command, params string) bool {
 		log.Println("command: who")
 		targetParts := strings.SplitN(params, " ", 2)
 		handleWho(client, targetParts[0])
+	case "WHOIS":
+		log.Println("command: whois")
+		targetParts := strings.SplitN(params, " ", 2)
+		handleWhois(client, targetParts[0])
 	default:
 		log.Printf("Unhandled command: %s\n", command)
 		client.conn.Write([]byte(fmt.Sprintf(":%s 421 %s %s :Unknown command\r\n", ServerNameString, client.Nickname, command)))
 	}
 	return false
+}
+
+func handleDisconnect(client *Client, err error) {
+	var quitMessage string
+	switch e := err.(type) {
+	case net.Error:
+		if e.Timeout() {
+			quitMessage = "Ping timeout"
+			log.Println("con: timeout:", client.conn.RemoteAddr().String())
+		} else {
+			quitMessage = "Connection error"
+			log.Println("con: disconnect:", client.conn.RemoteAddr().String())
+		}
+	default:
+		quitMessage = "Client quit"
+		log.Println("con: disconnect:", client.conn.RemoteAddr().String())
+	}
+
+	handleQuit(client, quitMessage)
+	// Remove client from all channels in the database
+	_, err = DB.Exec("DELETE FROM user_channels WHERE user_id = ?", client.ID)
+	if err != nil {
+		log.Printf("Error removing client from channels: %v", err)
+	}
+	// Update last_seen in the database
+	_, err = DB.Exec("UPDATE users SET last_seen = ? WHERE id = ?", time.Now(), client.ID)
+	if err != nil {
+		log.Printf("Error updating last_seen for client: %v", err)
+	}
+	// Remove the client from the active sessions
+	removeConnectedClient(client.Nickname)
+	// Reset the client's identification status
+	client.IsIdentified = false
+	_, err = DB.Exec("UPDATE users SET is_identified = ? WHERE id = ?", false, client.ID)
+	if err != nil {
+		log.Printf("Error resetting identification status for client: %v", err)
+	}
+	log.Printf("Client %s (%s) has been disconnected and removed from active sessions", client.Nickname, client.conn.RemoteAddr().String())
 }

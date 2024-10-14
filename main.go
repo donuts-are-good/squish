@@ -13,16 +13,82 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
-	"golang.org/x/crypto/bcrypt"
 )
 
 const ServerNameString = "SquishIRC"
 const ServerVersionString = "v0.1.1"
 
-// Add these constants at the top of the file
 const (
-	NickAuthTimeout = 30 * time.Second
-	NickSuffix      = "_"
+	NickSuffix = "_"
+)
+
+// IRC numeric replies
+const (
+	RPL_WELCOME          = "001"
+	RPL_YOURHOST         = "002"
+	RPL_CREATED          = "003"
+	RPL_MYINFO           = "004"
+	RPL_ISUPPORT         = "005"
+	RPL_UMODEIS          = "221"
+	RPL_LUSERCLIENT      = "251"
+	RPL_LUSEROP          = "252"
+	RPL_LUSERUNKNOWN     = "253"
+	RPL_LUSERCHANNELS    = "254"
+	RPL_LUSERME          = "255"
+	RPL_AWAY             = "301"
+	RPL_UNAWAY           = "305"
+	RPL_NOWAWAY          = "306"
+	RPL_WHOISUSER        = "311"
+	RPL_WHOISSERVER      = "312"
+	RPL_WHOISOPERATOR    = "313"
+	RPL_WHOISIDLE        = "317"
+	RPL_ENDOFWHOIS       = "318"
+	RPL_WHOISCHANNELS    = "319"
+	RPL_CHANNELMODEIS    = "324"
+	RPL_NOTOPIC          = "331"
+	RPL_TOPIC            = "332"
+	RPL_INVITING         = "341"
+	RPL_NAMREPLY         = "353"
+	RPL_ENDOFNAMES       = "366"
+	RPL_MOTD             = "372"
+	RPL_MOTDSTART        = "375"
+	RPL_ENDOFMOTD        = "376"
+	RPL_WHOREPLY         = "352"
+	RPL_ENDOFWHO         = "315"
+	RPL_YOUREOPER        = "381"
+	ERR_UNKNOWNERROR     = "400"
+	ERR_NOSUCHNICK       = "401"
+	ERR_NOSUCHSERVER     = "402"
+	ERR_NOSUCHCHANNEL    = "403"
+	ERR_CANNOTSENDTOCHAN = "404"
+	ERR_TOOMANYCHANNELS  = "405"
+	ERR_WASNOSUCHNICK    = "406"
+	ERR_NOORIGIN         = "409"
+	ERR_NORECIPIENT      = "411"
+	ERR_NOTEXTTOSEND     = "412"
+	ERR_UNKNOWNCOMMAND   = "421"
+	ERR_NOMOTD           = "422"
+	ERR_NONICKNAMEGIVEN  = "431"
+	ERR_ERRONEUSNICKNAME = "432"
+	ERR_NICKNAMEINUSE    = "433"
+	ERR_USERNOTINCHANNEL = "441"
+	ERR_NOTONCHANNEL     = "442"
+	ERR_USERONCHANNEL    = "443"
+	ERR_NOTREGISTERED    = "451"
+	ERR_NEEDMOREPARAMS   = "461"
+	ERR_ALREADYREGISTRED = "462"
+	ERR_PASSWDMISMATCH   = "464"
+	ERR_CHANNELISFULL    = "471"
+	ERR_UNKNOWNMODE      = "472"
+	ERR_INVITEONLYCHAN   = "473"
+	ERR_BANNEDFROMCHAN   = "474"
+	ERR_BADCHANNELKEY    = "475"
+	ERR_NOPRIVILEGES     = "481"
+	ERR_CHANOPRIVSNEEDED = "482"
+	ERR_CANTKILLSERVER   = "483"
+	ERR_NOOPERHOST       = "491"
+	ERR_UMODEUNKNOWNFLAG = "501"
+	ERR_USERSDONTMATCH   = "502"
 )
 
 var startTime = time.Now()
@@ -35,6 +101,7 @@ type Client struct {
 	Hostname     string     `db:"hostname" json:"hostname"`
 	Realname     string     `db:"realname" json:"realname"`
 	Password     string     `db:"password" json:"-"`
+	Email        string     `db:"email" json:"email"`
 	Channels     []*Channel `db:"-" json:"channels,omitempty"`
 	Invisible    bool       `db:"invisible" json:"invisible"`
 	IsOperator   bool       `db:"is_operator" json:"is_operator"`
@@ -42,7 +109,6 @@ type Client struct {
 	CreatedAt    time.Time  `db:"created_at" json:"created_at"`
 	IsIdentified bool       `db:"is_identified" json:"is_identified"`
 	LastSeen     time.Time  `db:"last_seen" json:"last_seen"`
-	Email        string     `db:"email" json:"email"`
 }
 
 type Channel struct {
@@ -57,83 +123,29 @@ type Channel struct {
 	Key                sql.NullString `db:"key" json:"key"`
 	UserLimit          int            `db:"user_limit" json:"user_limit"`
 	CreatedAt          time.Time      `db:"created_at" json:"created_at"`
+	IsRegistered       bool           `db:"is_registered" json:"is_registered"`
+	FounderID          sql.NullInt64  `db:"founder_id" json:"founder_id"`
+}
+
+// Add a new struct to represent the user_channels relationship
+type UserChannel struct {
+	UserID     int64     `db:"user_id"`
+	ChannelID  int64     `db:"channel_id"`
+	IsOperator bool      `db:"is_operator"`
+	HasVoice   bool      `db:"has_voice"`
+	JoinedAt   time.Time `db:"joined_at"`
+}
+
+type ChanServType struct {
+	client *Client
 }
 
 var (
-	clients  []*Client
-	channels []*Channel
-	mu       sync.Mutex
-	DB       *sqlx.DB
+	DB               *sqlx.DB
+	ChanServ         *ChanServType
+	connectedClients map[string]*Client
+	clientsMutex     sync.RWMutex
 )
-
-func startDB() (*sqlx.DB, error) {
-	dbPath := "irc.db"
-
-	// Check if the database file exists
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		log.Println("Database file does not exist. Creating a new one.")
-		file, err := os.Create(dbPath)
-		if err != nil {
-			return nil, fmt.Errorf("error creating database file: %v", err)
-		}
-		file.Close()
-	}
-
-	// Connect to the database
-	db, err := sqlx.Connect("sqlite3", dbPath)
-	if err != nil {
-		return nil, fmt.Errorf("error connecting to database: %v", err)
-	}
-
-	// Create tables
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS users (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			nickname TEXT UNIQUE,
-			username TEXT,
-			hostname TEXT,
-			realname TEXT,
-			password TEXT,
-			invisible BOOLEAN DEFAULT 0,
-			is_operator BOOLEAN DEFAULT 0,
-			has_voice BOOLEAN DEFAULT 0,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			email TEXT,
-			is_identified BOOLEAN DEFAULT 0,
-			last_seen TIMESTAMP
-		);
-
-		CREATE TABLE IF NOT EXISTS channels (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			name TEXT UNIQUE,
-			topic TEXT,
-			no_external_messages BOOLEAN DEFAULT 0,
-			topic_protection BOOLEAN DEFAULT 0,
-			moderated BOOLEAN DEFAULT 0,
-			invite_only BOOLEAN DEFAULT 0,
-			key TEXT,
-			user_limit INTEGER DEFAULT 0,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		);
-
-		CREATE TABLE IF NOT EXISTS user_channels (
-			user_id INTEGER,
-			channel_id INTEGER,
-			is_operator BOOLEAN DEFAULT 0,
-			has_voice BOOLEAN DEFAULT 0,
-			joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			PRIMARY KEY (user_id, channel_id),
-			FOREIGN KEY (user_id) REFERENCES users(id),
-			FOREIGN KEY (channel_id) REFERENCES channels(id)
-		);
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("error creating tables: %v", err)
-	}
-
-	log.Println("Database initialized successfully")
-	return db, nil
-}
 
 func main() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
@@ -157,23 +169,16 @@ func main() {
 	}
 	defer DB.Close()
 
-	// Create default channels
-	defaultChannels := []string{"#general", "#help", "#off-topic"}
-	for _, channelName := range defaultChannels {
-		_, err := getOrCreateChannel(channelName)
-		if err != nil {
-			log.Printf("Error creating default channel %s: %v", channelName, err)
-		}
-	}
+	// Initialize the ChanServ object
+	ChanServ = NewChanServ()
+
+	// Initialize default channels
+	initializeDefaultChannels()
+
+	connectedClients = make(map[string]*Client)
 
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
-
-	go func() {
-		for range ticker.C {
-			syncInMemoryState()
-		}
-	}()
 
 	for {
 		conn, err := ln.Accept()
@@ -237,14 +242,6 @@ func sendWelcomeMessages(client *Client) {
 }
 
 func removeClient(client *Client) {
-	mu.Lock()
-	defer mu.Unlock()
-	for i, c := range clients {
-		if c.conn == client.conn {
-			clients = append(clients[:i], clients[i+1:]...)
-			break
-		}
-	}
 	for _, channel := range client.Channels {
 		err := removeClientFromChannel(client, channel)
 		if err != nil {
@@ -264,257 +261,9 @@ func sanitizeString(input string) string {
 }
 
 func findClientByNickname(nickname string) *Client {
-	mu.Lock()
-	defer mu.Unlock()
-	for _, client := range clients {
-		if client.Nickname == nickname {
-			return client
-		}
-	}
-	return nil
-}
-
-func findChannel(name string) *Channel {
-	mu.Lock()
-	defer mu.Unlock()
-	for _, channel := range channels {
-		if channel.Name == name {
-			return channel
-		}
-	}
-	return nil
-}
-
-func getClientByNickname(nickname string) (*Client, error) {
-	var client Client
-	err := DB.Get(&client, "SELECT id, nickname, username, hostname, realname, password, invisible, is_operator, has_voice, created_at FROM users WHERE nickname = ?", nickname)
-	if err != nil {
-		return nil, err
-	}
-	return &client, nil
-}
-
-func updateClientInfo(client *Client) error {
-	_, err := DB.Exec(`
-		UPDATE users 
-		SET username = ?, hostname = ?, realname = ?, password = ?
-		WHERE nickname = ?
-	`, client.Username, client.Hostname, client.Realname, client.Password, client.Nickname)
-	return err
-}
-
-func createClient(client *Client) error {
-	result, err := DB.Exec(`
-		INSERT INTO users (nickname, username, hostname, realname, password, created_at, last_seen)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, client.Nickname, client.Username, client.Hostname, client.Realname, client.Password, client.CreatedAt, client.LastSeen)
-	if err != nil {
-		return err
-	}
-	id, err := result.LastInsertId()
-	if err != nil {
-		return err
-	}
-	client.ID = id
-	return nil
-}
-
-// Add this new function to verify passwords
-func verifyPassword(hashedPassword, password string) bool {
-	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
-	return err == nil
-}
-
-func getOrCreateChannel(name string) (*Channel, error) {
-	var channel Channel
-	err := DB.Get(&channel, "SELECT * FROM channels WHERE name = ?", name)
-	if err == nil {
-		return &channel, nil
-	}
-	if err != sql.ErrNoRows {
-		return nil, err
-	}
-
-	result, err := DB.Exec(`
-		INSERT INTO channels (name, topic)
-		VALUES (?, ?)
-	`, name, "Welcome to "+name)
-	if err != nil {
-		return nil, err
-	}
-
-	id, err := result.LastInsertId()
-	if err != nil {
-		return nil, err
-	}
-
-	channel = Channel{
-		ID:    id,
-		Name:  name,
-		Topic: "Welcome to " + name,
-		Key:   sql.NullString{String: "", Valid: false},
-	}
-	return &channel, nil
-}
-
-func addClientToChannel(client *Client, channel *Channel) error {
-	_, err := DB.Exec(`
-		INSERT INTO user_channels (user_id, channel_id)
-		VALUES (?, ?)
-	`, client.ID, channel.ID)
-	return err
-}
-
-func removeClientFromChannel(client *Client, channel *Channel) error {
-	// Remove from in-memory structure
-	for i, c := range channel.Clients {
-		if c.conn == client.conn {
-			channel.Clients = append(channel.Clients[:i], channel.Clients[i+1:]...)
-			break
-		}
-	}
-
-	// Remove from database
-	_, err := DB.Exec(`
-		DELETE FROM user_channels
-		WHERE user_id = ? AND channel_id = ?
-	`, client.ID, channel.ID)
-	return err
-}
-
-func getChannelsForClient(client *Client) ([]*Channel, error) {
-	var channels []*Channel
-	err := DB.Select(&channels, `
-		SELECT c.*
-		FROM channels c
-		JOIN user_channels uc ON c.id = uc.channel_id
-		WHERE uc.user_id = ?
-	`, client.ID)
-	return channels, err
-}
-
-func getClientsInChannel(channel *Channel) ([]*Client, error) {
-	var clients []*Client
-	err := DB.Select(&clients, `
-		SELECT u.*
-		FROM users u
-		JOIN user_channels uc ON u.id = uc.user_id
-		WHERE uc.channel_id = ?
-	`, channel.ID)
-	return clients, err
-}
-
-func syncInMemoryState() {
-	mu.Lock()
-	defer mu.Unlock()
-
-	for _, client := range clients {
-		channels, err := getChannelsForClient(client)
-		if err != nil {
-			log.Printf("Error syncing channels for client %s: %v", client.Nickname, err)
-		} else {
-			client.Channels = channels
-		}
-	}
-
-	for _, channel := range channels {
-		clients, err := getClientsInChannel(channel)
-		if err != nil {
-			log.Printf("Error syncing clients for channel %s: %v", channel.Name, err)
-		} else {
-			channel.Clients = clients
-		}
-	}
-}
-
-// Modify the handleNick function
-func handleNick(client *Client, nickname string) {
-	log.Printf("Handling NICK command for %s, new nickname: %s", client.conn.RemoteAddr().String(), nickname)
-	if len(nickname) > 50 {
-		log.Printf("Nickname too long: %s", nickname)
-		client.conn.Write([]byte(fmt.Sprintf(":%s 432 * %s :Erroneous nickname\r\n", ServerNameString, nickname)))
-		return
-	}
-
-	// Check if the nickname is already in use in the database
-	existingClient, err := getClientByNickname(nickname)
-	if err != nil && err != sql.ErrNoRows {
-		log.Printf("Error checking existing nickname: %v", err)
-		return
-	}
-
-	if err == nil && existingClient != nil {
-		// Nickname is registered
-		if client.IsIdentified && client.Nickname == nickname {
-			// Client is already identified for this nickname
-			return
-		}
-
-		// Give the client time to identify
-		client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :This nickname is registered. Please identify via /msg NickServ IDENTIFY <password>\r\n", ServerNameString, nickname)))
-
-		oldNickname := client.Nickname
-		client.Nickname = nickname
-
-		// Notify the client and other users about the nickname change
-		client.conn.Write([]byte(fmt.Sprintf(":%s NICK %s\r\n", oldNickname, nickname)))
-		notifyNicknameChange(client, oldNickname, nickname)
-
-		// Start a goroutine to handle the timeout
-		go func() {
-			time.Sleep(NickAuthTimeout)
-			if !client.IsIdentified {
-				// Client didn't identify in time, revert to old nickname or generate a new one
-				newNickname := oldNickname
-				if newNickname == "" || isNicknameInUse(newNickname) {
-					newNickname = generateUniqueNickname(nickname)
-				}
-				handleNick(client, newNickname)
-			}
-		}()
-
-		return
-	}
-
-	// Nickname is not registered or in use
-	oldNickname := client.Nickname
-	client.Nickname = nickname
-
-	// Update the nickname in the database if the client is already registered
-	if client.ID != 0 {
-		err = updateClientNickname(client)
-		if err != nil {
-			log.Printf("Error updating client nickname in database: %v", err)
-			client.Nickname = oldNickname
-			client.conn.Write([]byte(fmt.Sprintf(":%s 432 %s :Nickname change failed\r\n", ServerNameString, nickname)))
-			return
-		}
-	}
-
-	// Notify the client and other users about the nickname change
-	client.conn.Write([]byte(fmt.Sprintf(":%s NICK %s\r\n", oldNickname, nickname)))
-	notifyNicknameChange(client, oldNickname, nickname)
-
-	// Check if we have both NICK and USER info
-	if client.Username != "" && client.ID == 0 {
-		completeRegistration(client)
-	}
-}
-
-// Add this helper function
-func isNicknameInUse(nickname string) bool {
-	_, err := getClientByNickname(nickname)
-	return err == nil
-}
-
-func generateUniqueNickname(base string) string {
-	newNickname := base
-	suffix := 1
-	for isNicknameInUse(newNickname) {
-		newNickname = fmt.Sprintf("%s%d", base, suffix)
-		suffix++
-	}
-	return newNickname
+	clientsMutex.RLock()
+	defer clientsMutex.RUnlock()
+	return connectedClients[nickname]
 }
 
 func notifyNicknameChange(client *Client, oldNickname, newNickname string) {
@@ -527,7 +276,47 @@ func notifyNicknameChange(client *Client, oldNickname, newNickname string) {
 	}
 }
 
-func updateClientNickname(client *Client) error {
-	_, err := DB.Exec("UPDATE users SET nickname = ? WHERE id = ?", client.Nickname, client.ID)
-	return err
+// Add this new function
+func initializeDefaultChannels() {
+	defaultChannels := []string{"#general", "#help", "#random"}
+	for _, channelName := range defaultChannels {
+		log.Printf("Initializing default channel: %s", channelName)
+		channel, err := getOrCreateChannel(channelName)
+		if err != nil {
+			log.Printf("Error creating default channel %s: %v", channelName, err)
+			continue
+		}
+		if !channel.IsRegistered {
+			err = setChannelRegistered(channel.ID, 0) // Use 0 as the founder ID for server-created channels
+			if err != nil {
+				log.Printf("Error registering default channel %s: %v", channelName, err)
+			} else {
+				log.Printf("Default channel %s registered successfully", channelName)
+			}
+		} else {
+			log.Printf("Default channel %s is already registered", channelName)
+		}
+	}
+}
+
+// Add these new functions to manage connected clients
+func addConnectedClient(client *Client) {
+	clientsMutex.Lock()
+	defer clientsMutex.Unlock()
+	connectedClients[client.Nickname] = client
+}
+
+func removeConnectedClient(nickname string) {
+	clientsMutex.Lock()
+	defer clientsMutex.Unlock()
+	delete(connectedClients, nickname)
+}
+
+func updateConnectedClientNickname(oldNickname, newNickname string) {
+	clientsMutex.Lock()
+	defer clientsMutex.Unlock()
+	if client, ok := connectedClients[oldNickname]; ok {
+		delete(connectedClients, oldNickname)
+		connectedClients[newNickname] = client
+	}
 }
