@@ -341,12 +341,3 @@ func setClientChannelOperator(client *Client, channel *Channel, isOperator bool)
 	_, err := DB.Exec("UPDATE user_channels SET is_operator = ? WHERE user_id = ? AND channel_id = ?", isOperator, client.ID, channel.ID)
 	return err
 }
-
-func getChannel(name string) (*Channel, error) {
-	var channel Channel
-	err := DB.Get(&channel, "SELECT * FROM channels WHERE name = ?", name)
-	if err != nil {
-		return nil, err
-	}
-	return &channel, nil
-}

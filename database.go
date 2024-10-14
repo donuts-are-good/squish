@@ -229,3 +229,12 @@ func isClientInChannel(client *Client, channel *Channel) (bool, error) {
 	}
 	return count > 0, nil
 }
+
+func getChannel(name string) (*Channel, error) {
+	var channel Channel
+	err := DB.Get(&channel, "SELECT * FROM channels WHERE name = ?", name)
+	if err != nil {
+		return nil, err
+	}
+	return &channel, nil
+}

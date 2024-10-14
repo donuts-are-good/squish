@@ -739,6 +739,7 @@ func handleWho(client *Client, target string) {
 	log.Printf("Handling WHO command for target: %s", target)
 
 	var users []*Client
+	var err error
 
 	if strings.HasPrefix(target, "#") {
 		// WHO for a channel
@@ -749,15 +750,22 @@ func handleWho(client *Client, target string) {
 		}
 		users, err = getClientsInChannel(channel)
 		if err != nil {
-			client.sendNumeric(ERR_UNKNOWNERROR, "Error fetching users for WHO")
+			log.Printf("Error getting clients in channel: %v", err)
+			client.sendNumeric(ERR_UNKNOWNERROR, "Error processing WHO command")
 			return
 		}
+	} else if target == "" {
+		// WHO for all visible users
+		users, err = getAllVisibleClients()
 	} else {
-		// WHO for a user
-		targetClient, err := getClientByNickname(target)
-		if err == nil {
-			users = []*Client{targetClient}
-		}
+		// WHO for a specific user or mask
+		users, err = getClientsByMask(target)
+	}
+
+	if err != nil {
+		log.Printf("Error processing WHO command: %v", err)
+		client.sendNumeric(ERR_UNKNOWNERROR, "Error processing WHO command")
+		return
 	}
 
 	for _, user := range users {
@@ -768,14 +776,12 @@ func handleWho(client *Client, target string) {
 }
 
 func sendWhoReply(client *Client, target *Client, channelName string) {
-	flags := ""
+	flags := "H" // Here
 	if target.IsOperator {
 		flags += "*"
 	}
 	if target.Invisible {
-		flags += "G"
-	} else {
-		flags += "H"
+		flags = "G" // Gone (invisible)
 	}
 
 	client.sendNumeric(RPL_WHOREPLY,
@@ -833,6 +839,19 @@ func handleWhois(client *Client, target string) {
 }
 
 // Add these helper functions
+
+func getAllVisibleClients() ([]*Client, error) {
+	var clients []*Client
+	err := DB.Select(&clients, "SELECT * FROM users WHERE invisible = 0")
+	return clients, err
+}
+
+func getClientsByMask(mask string) ([]*Client, error) {
+	mask = strings.ReplaceAll(mask, "*", "%")
+	var clients []*Client
+	err := DB.Select(&clients, "SELECT * FROM users WHERE nickname LIKE ? OR username LIKE ? OR hostname LIKE ?", mask, mask, mask)
+	return clients, err
+}
 
 func getChannelsForUser(client *Client) ([]*Channel, error) {
 	var channels []*Channel
