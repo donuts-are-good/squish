@@ -134,14 +134,17 @@ func handleJoin(client *Client, channelName string) {
 		// Add the channel to the client's list of channels
 		client.Channels = append(client.Channels, channel)
 
-		// Send JOIN message to all clients in the channel, including the joining client
+		// Send JOIN message to the client itself first
 		joinMessage := fmt.Sprintf(":%s!%s@%s JOIN %s\r\n", client.Nickname, client.Username, client.Hostname, channelName)
+		client.conn.Write([]byte(joinMessage))
+
+		// Then send JOIN message to other clients in the channel
 		channelClients, err := getClientsInChannel(channel)
 		if err != nil {
 			log.Printf("Error getting clients in channel %s: %v", channelName, err)
 		} else {
 			for _, c := range channelClients {
-				if c.conn != nil {
+				if c.conn != nil && c != client {
 					c.conn.Write([]byte(joinMessage))
 				}
 			}
