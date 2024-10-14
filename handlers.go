@@ -144,6 +144,7 @@ func handleJoin(client *Client, channelNames string) {
 		}
 
 		if !isAlreadyInChannel {
+			// Add the client to the channel in the database
 			err = addClientToChannel(client, channel, false) // Always add as a regular user first
 			if err != nil {
 				log.Printf("Error adding client %s to channel %s: %v", client.Nickname, channelName, err)
@@ -154,12 +155,15 @@ func handleJoin(client *Client, channelNames string) {
 			// Add the channel to the client's list of channels
 			client.Channels = append(client.Channels, channel)
 
+			// Add the client to the channel's list of clients
+			channel.Clients = append(channel.Clients, client)
+
 			// Send JOIN message to all clients in the channel
 			joinMessage := fmt.Sprintf(":%s!%s@%s JOIN %s\r\n", client.Nickname, client.Username, client.Hostname, channelName)
 			broadcastToChannel(channel, joinMessage)
 
 			// If this is a new channel, inform the user about registration
-			if channel.CreatedAt.IsZero() {
+			if !channel.IsRegistered {
 				client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :This channel is not registered. To register it, use /MSG ChanServ REGISTER %s\r\n", ServerNameString, client.Nickname, channelName)))
 			}
 		}

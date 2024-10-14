@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
@@ -120,16 +121,22 @@ func getOrCreateChannel(name string) (*Channel, error) {
 	var channel Channel
 	err := DB.Get(&channel, "SELECT * FROM channels WHERE name = ?", name)
 	if err == nil {
+		// Channel exists, fetch its clients
+		channel.Clients, err = getClientsInChannel(&channel)
+		if err != nil {
+			return nil, fmt.Errorf("error fetching clients for channel %s: %v", name, err)
+		}
 		return &channel, nil
 	}
 	if err != sql.ErrNoRows {
 		return nil, err
 	}
 
+	// Channel doesn't exist, create it
 	result, err := DB.Exec(`
-		INSERT INTO channels (name, topic)
-		VALUES (?, ?)
-	`, name, "Welcome to "+name)
+		INSERT INTO channels (name, topic, created_at)
+		VALUES (?, ?, ?)
+	`, name, "Welcome to "+name, time.Now())
 	if err != nil {
 		return nil, err
 	}
@@ -140,10 +147,12 @@ func getOrCreateChannel(name string) (*Channel, error) {
 	}
 
 	channel = Channel{
-		ID:    id,
-		Name:  name,
-		Topic: "Welcome to " + name,
-		Key:   sql.NullString{String: "", Valid: false},
+		ID:        id,
+		Name:      name,
+		Topic:     "Welcome to " + name,
+		Key:       sql.NullString{String: "", Valid: false},
+		CreatedAt: time.Now(),
+		Clients:   []*Client{},
 	}
 	return &channel, nil
 }
