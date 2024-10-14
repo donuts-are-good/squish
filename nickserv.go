@@ -91,7 +91,7 @@ func handleNickServRegister(client *Client, args []string) {
 
 	log.Printf("Nickname %s registered successfully with password hash: %s", client.Nickname, client.Password)
 	sendNickServMessage(client, fmt.Sprintf("Nickname %s registered successfully", client.Nickname))
-	sendNickServMessage(client, "You can now identify using /msg NickServ IDENTIFY <password>")
+	sendNickServMessage(client, "You can now identify using /msg NickServ IDENTIFY <nickname> <password>")
 }
 
 func handleNickServIdentify(client *Client, args []string) {
@@ -115,6 +115,8 @@ func handleNickServIdentify(client *Client, args []string) {
 	}
 
 	log.Printf("Attempting to verify password for %s", targetNick)
+	log.Printf("Stored password hash: %s", existingClient.Password)
+	log.Printf("Supplied password: %s", password)
 
 	if verifyPassword(existingClient.Password, password) {
 		// If the client is using a different nickname, change it
@@ -237,9 +239,10 @@ func (client *Client) sendNumeric(numeric string, params ...string) {
 }
 
 func verifyPassword(hashedPassword, password string) bool {
+	log.Printf("Comparing hashedPassword: %s with password: %s", hashedPassword, password)
 	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
 	if err != nil {
-		log.Printf("Password verification failed here: %v", err)
+		log.Printf("Password verification failed: %v", err)
 	}
 	return err == nil
 }
