@@ -647,11 +647,12 @@ func handleTopic(client *Client, channelName string, newTopic string) {
 	// Update the channel object
 	channel.Topic = newTopic
 
-	// Notify all users in the channel about the topic change
+	// Prepare the topic change messages
 	topicChangeMessage := fmt.Sprintf(":%s!%s@%s TOPIC %s :%s\r\n", client.Nickname, client.Username, client.Hostname, channelName, newTopic)
-	topicInfoMessage := fmt.Sprintf(":%s 332 %s %s :%s\r\n", ServerNameString, client.Nickname, channelName, newTopic)
-	topicSetByMessage := fmt.Sprintf(":%s 333 %s %s %s %d\r\n", ServerNameString, client.Nickname, channelName, client.Nickname, time.Now().Unix())
+	topicInfoMessage := fmt.Sprintf(":%s 332 %s %s :%s\r\n", ServerNameString, "*", channelName, newTopic)
+	topicSetByMessage := fmt.Sprintf(":%s 333 %s %s %s %d\r\n", ServerNameString, "*", channelName, client.Nickname, time.Now().Unix())
 
+	// Broadcast the topic change to all users in the channel
 	rows, err := DB.Query("SELECT u.nickname FROM users u JOIN user_channels uc ON u.id = uc.user_id WHERE uc.channel_id = ?", channel.ID)
 	if err != nil {
 		log.Printf("handleTopic: error fetching channel users: %v", err)
@@ -667,18 +668,10 @@ func handleTopic(client *Client, channelName string, newTopic string) {
 		}
 		targetClient := findClientByNickname(nickname)
 		if targetClient != nil && targetClient.conn != nil {
-			_, err := targetClient.conn.Write([]byte(topicChangeMessage))
-			if err != nil {
-				log.Printf("handleTopic: error sending topic change to %s: %v", nickname, err)
-			}
-			_, err = targetClient.conn.Write([]byte(topicInfoMessage))
-			if err != nil {
-				log.Printf("handleTopic: error sending topic info to %s: %v", nickname, err)
-			}
-			_, err = targetClient.conn.Write([]byte(topicSetByMessage))
-			if err != nil {
-				log.Printf("handleTopic: error sending topic set by info to %s: %v", nickname, err)
-			}
+			log.Printf("handleTopic: sending topic change to %s", nickname)
+			targetClient.conn.Write([]byte(topicChangeMessage))
+			targetClient.conn.Write([]byte(topicInfoMessage))
+			targetClient.conn.Write([]byte(topicSetByMessage))
 		}
 	}
 
