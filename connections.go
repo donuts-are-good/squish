@@ -30,21 +30,23 @@ func handleConnection(conn net.Conn) {
 		return
 	}
 
-	pingTicker := time.NewTicker(1 * time.Minute)
+	pingTicker := time.NewTicker(30 * time.Second)
 	defer pingTicker.Stop()
 
 	lastPingResponse := time.Now()
+	var lastPingSent time.Time
 
 	log.Printf("Starting main loop for %s", conn.RemoteAddr().String())
 	for {
 		select {
 		case <-pingTicker.C:
-			if time.Since(lastPingResponse) > 2*time.Minute {
+			if time.Since(lastPingResponse) > 60*time.Second && !lastPingSent.IsZero() {
 				log.Printf("Ping timeout for %s", conn.RemoteAddr().String())
 				handleDisconnect(client, fmt.Errorf("ping timeout"))
 				return
 			}
 			log.Printf("Sending PING to %s", conn.RemoteAddr().String())
+			lastPingSent = time.Now()
 			_, err := conn.Write([]byte(fmt.Sprintf("PING :%s\r\n", ServerNameString)))
 			if err != nil {
 				log.Printf("Error sending PING: %v", err)
@@ -61,21 +63,24 @@ func handleConnection(conn net.Conn) {
 				return
 			}
 
-			lastPingResponse = time.Now()
-
 			log.Printf("Received message from %s: %s", conn.RemoteAddr().String(), strings.TrimSpace(message))
 			message = strings.Trim(message, "\r\n")
 			parts := strings.SplitN(message, " ", 2)
 
-			if len(parts) > 1 {
-				command, params := parts[0], parts[1]
-				if commandParser(client, command, params) {
-					log.Printf("Client %s requested disconnect", conn.RemoteAddr().String())
-					return
+			if len(parts) > 0 {
+				command := strings.ToUpper(parts[0])
+				params := ""
+				if len(parts) > 1 {
+					params = parts[1]
 				}
-			} else if len(parts) == 1 {
-				command := parts[0]
-				if commandParser(client, command, "") {
+
+				if command == "PONG" {
+					lastPingResponse = time.Now()
+					lastPingSent = time.Time{}
+					continue
+				}
+
+				if commandParser(client, command, params) {
 					log.Printf("Client %s requested disconnect", conn.RemoteAddr().String())
 					return
 				}
@@ -85,12 +90,9 @@ func handleConnection(conn net.Conn) {
 }
 
 func commandParser(client *Client, command, params string) bool {
-	command = strings.ToUpper(command) // Convert command to uppercase
 	switch command {
 	case "PING":
 		client.conn.Write([]byte(fmt.Sprintf("PONG %s\r\n", params)))
-	case "PONG":
-		log.Println("PONG!")
 	case "NICK":
 		log.Println("command: nick")
 		sanitizedNickname := sanitizeString(params)
@@ -99,7 +101,7 @@ func commandParser(client *Client, command, params string) bool {
 		log.Println("command: user")
 		userParts := strings.SplitN(params, " ", 4)
 		if len(userParts) == 4 {
-			handleUser(client, userParts[0], userParts[1], userParts[2])
+			handleUser(client, userParts[0], userParts[1], userParts[3])
 		}
 	case "NAMES":
 		log.Println("command: names")

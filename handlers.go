@@ -289,6 +289,11 @@ func completeRegistration(client *Client) {
 		return
 	}
 
+	client.Password = string(hashedPassword)
+	client.IsIdentified = true // Set the client as identified
+	client.CreatedAt = time.Now()
+	client.LastSeen = time.Now()
+
 	err = createOrUpdateClient(client, string(hashedPassword))
 	if err != nil {
 		log.Printf("Error updating client information: %v", err)

@@ -19,10 +19,8 @@ import (
 const ServerNameString = "SquishIRC"
 const ServerVersionString = "v0.1.1"
 
-// Add these constants at the top of the file
 const (
-	NickAuthTimeout = 30 * time.Second
-	NickSuffix      = "_"
+	NickSuffix = "_"
 )
 
 var startTime = time.Now()

@@ -91,17 +91,17 @@ func getClientByNickname(nickname string) (*Client, error) {
 func updateClientInfo(client *Client) error {
 	_, err := DB.Exec(`
 		UPDATE users 
-		SET username = ?, hostname = ?, realname = ?, password = ?, last_seen = ?, email = ?
+		SET username = ?, hostname = ?, realname = ?, password = ?, last_seen = ?, email = ?, is_identified = ?
 		WHERE nickname = ?
-	`, client.Username, client.Hostname, client.Realname, client.Password, client.LastSeen, client.Email, client.Nickname)
+	`, client.Username, client.Hostname, client.Realname, client.Password, client.LastSeen, client.Email, client.IsIdentified, client.Nickname)
 	return err
 }
 
 func createClient(client *Client) error {
 	result, err := DB.Exec(`
 		INSERT INTO users (nickname, username, hostname, realname, password, created_at, last_seen, email)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, client.Nickname, client.Username, client.Hostname, client.Realname, client.Password, client.CreatedAt, client.LastSeen, client.Email)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`, client.Nickname, client.Username, client.Hostname, client.Realname, client.Password, client.CreatedAt, client.LastSeen, client.Email)
 	if err != nil {
 		return err
 	}
