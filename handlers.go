@@ -625,6 +625,7 @@ func handleTopic(client *Client, channelName string, newTopic string) {
 	if newTopic == "" {
 		// Send current topic
 		client.conn.Write([]byte(fmt.Sprintf(":%s 332 %s %s :%s\r\n", ServerNameString, client.Nickname, channelName, channel.Topic)))
+		client.conn.Write([]byte(fmt.Sprintf(":%s 333 %s %s %s %d\r\n", ServerNameString, client.Nickname, channelName, "Unknown", time.Now().Unix())))
 		return
 	}
 
@@ -647,14 +648,16 @@ func handleTopic(client *Client, channelName string, newTopic string) {
 	channel.Topic = newTopic
 
 	// Notify all users in the channel about the topic change
+	topicChangeMessage := fmt.Sprintf(":%s!%s@%s TOPIC %s :%s\r\n", client.Nickname, client.Username, client.Hostname, channelName, newTopic)
+	topicInfoMessage := fmt.Sprintf(":%s 332 %s %s :%s\r\n", ServerNameString, client.Nickname, channelName, newTopic)
+	topicSetByMessage := fmt.Sprintf(":%s 333 %s %s %s %d\r\n", ServerNameString, client.Nickname, channelName, client.Nickname, time.Now().Unix())
+
 	rows, err := DB.Query("SELECT u.nickname FROM users u JOIN user_channels uc ON u.id = uc.user_id WHERE uc.channel_id = ?", channel.ID)
 	if err != nil {
 		log.Printf("handleTopic: error fetching channel users: %v", err)
 		return
 	}
 	defer rows.Close()
-
-	topicChangeMessage := fmt.Sprintf(":%s!%s@%s TOPIC %s :%s\r\n", client.Nickname, client.Username, client.Hostname, channelName, newTopic)
 
 	for rows.Next() {
 		var nickname string
@@ -668,11 +671,16 @@ func handleTopic(client *Client, channelName string, newTopic string) {
 			if err != nil {
 				log.Printf("handleTopic: error sending topic change to %s: %v", nickname, err)
 			}
+			_, err = targetClient.conn.Write([]byte(topicInfoMessage))
+			if err != nil {
+				log.Printf("handleTopic: error sending topic info to %s: %v", nickname, err)
+			}
+			_, err = targetClient.conn.Write([]byte(topicSetByMessage))
+			if err != nil {
+				log.Printf("handleTopic: error sending topic set by info to %s: %v", nickname, err)
+			}
 		}
 	}
-
-	// Send a confirmation to the client who changed the topic
-	client.conn.Write([]byte(fmt.Sprintf(":%s 332 %s %s :%s\r\n", ServerNameString, client.Nickname, channelName, newTopic)))
 
 	log.Printf("handleTopic: topic updated successfully for channel %s", channelName)
 }
