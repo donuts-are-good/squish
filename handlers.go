@@ -717,12 +717,6 @@ func handleTopic(client *Client, channelName string, newTopic string) {
 	log.Printf("handleTopic: topic updated successfully for channel %s", channelName)
 }
 
-func handleWho(client *Client, target string) {
-	log.Printf("Handling WHO command for target: %s", target)
-	// For now, just send an empty WHO reply
-	client.conn.Write([]byte(fmt.Sprintf(":%s 315 %s %s :End of WHO list\r\n", ServerNameString, client.Nickname, target)))
-}
-
 func findChannel(name string) *Channel {
 	log.Printf("findChannel: searching for channel: %s", name)
 	var channel Channel
@@ -737,4 +731,128 @@ func findChannel(name string) *Channel {
 	}
 	log.Printf("findChannel: found channel: %s", name)
 	return &channel
+}
+
+// Add these new functions to the handlers.go file
+
+func handleWho(client *Client, target string) {
+	log.Printf("Handling WHO command for target: %s", target)
+
+	var users []*Client
+
+	if strings.HasPrefix(target, "#") {
+		// WHO for a channel
+		channel, err := getChannel(target)
+		if err != nil {
+			client.sendNumeric(ERR_NOSUCHCHANNEL, target, "No such channel")
+			return
+		}
+		users, err = getClientsInChannel(channel)
+		if err != nil {
+			client.sendNumeric(ERR_UNKNOWNERROR, "Error fetching users for WHO")
+			return
+		}
+	} else {
+		// WHO for a user
+		targetClient, err := getClientByNickname(target)
+		if err == nil {
+			users = []*Client{targetClient}
+		}
+	}
+
+	for _, user := range users {
+		sendWhoReply(client, user, target)
+	}
+
+	client.sendNumeric(RPL_ENDOFWHO, target, "End of WHO list")
+}
+
+func sendWhoReply(client *Client, target *Client, channelName string) {
+	flags := ""
+	if target.IsOperator {
+		flags += "*"
+	}
+	if target.Invisible {
+		flags += "G"
+	} else {
+		flags += "H"
+	}
+
+	client.sendNumeric(RPL_WHOREPLY,
+		channelName,
+		target.Username,
+		target.Hostname,
+		ServerNameString,
+		target.Nickname,
+		flags,
+		fmt.Sprintf("0 %s", target.Realname))
+}
+
+func handleWhois(client *Client, target string) {
+	log.Printf("Handling WHOIS command for target: %s", target)
+
+	targetClient, err := getClientByNickname(target)
+	if err != nil {
+		client.sendNumeric(ERR_NOSUCHNICK, target, "No such nick/channel")
+		return
+	}
+
+	// Send WHOIS information
+	client.sendNumeric(RPL_WHOISUSER, targetClient.Nickname, targetClient.Username, targetClient.Hostname, "*", targetClient.Realname)
+
+	// Send channels the user is in
+	channels, err := getChannelsForUser(targetClient)
+	if err == nil && len(channels) > 0 {
+		var channelList []string
+		for _, channel := range channels {
+			prefix := ""
+			if isChannelOperator(targetClient, channel) {
+				prefix = "@"
+			} else if hasChannelVoice(targetClient, channel) {
+				prefix = "+"
+			}
+			channelList = append(channelList, prefix+channel.Name)
+		}
+		client.sendNumeric(RPL_WHOISCHANNELS, targetClient.Nickname, strings.Join(channelList, " "))
+	}
+
+	// Send server info
+	client.sendNumeric(RPL_WHOISSERVER, targetClient.Nickname, ServerNameString, "SquishIRC Server")
+
+	// Send additional info
+	if targetClient.IsOperator {
+		client.sendNumeric(RPL_WHOISOPERATOR, targetClient.Nickname, "is an IRC operator")
+	}
+
+	// Fix: Convert seconds to int64
+	idleSeconds := int64(time.Since(targetClient.LastSeen).Seconds())
+	client.sendNumeric(RPL_WHOISIDLE, targetClient.Nickname, fmt.Sprintf("%d", idleSeconds), fmt.Sprintf("%d", targetClient.CreatedAt.Unix()), "seconds idle, signon time")
+
+	// End of WHOIS
+	client.sendNumeric(RPL_ENDOFWHOIS, targetClient.Nickname, "End of WHOIS list")
+}
+
+// Add these helper functions
+
+func getChannelsForUser(client *Client) ([]*Channel, error) {
+	var channels []*Channel
+	err := DB.Select(&channels, `
+		SELECT c.* 
+		FROM channels c
+		JOIN user_channels uc ON c.id = uc.channel_id
+		WHERE uc.user_id = ?
+	`, client.ID)
+	return channels, err
+}
+
+func isChannelOperator(client *Client, channel *Channel) bool {
+	var isOperator bool
+	err := DB.QueryRow("SELECT is_operator FROM user_channels WHERE user_id = ? AND channel_id = ?", client.ID, channel.ID).Scan(&isOperator)
+	return err == nil && isOperator
+}
+
+func hasChannelVoice(client *Client, channel *Channel) bool {
+	var hasVoice bool
+	err := DB.QueryRow("SELECT has_voice FROM user_channels WHERE user_id = ? AND channel_id = ?", client.ID, channel.ID).Scan(&hasVoice)
+	return err == nil && hasVoice
 }

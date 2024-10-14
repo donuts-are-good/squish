@@ -12,13 +12,8 @@ import (
 
 // IRC numeric replies
 const (
-	RPL_NOTICE         = "NOTICE"
-	ERR_NEEDMOREPARAMS = "461"
-	ERR_NICKNAMEINUSE  = "433"
-	ERR_UNKNOWNERROR   = "400"
-	ERR_NOSUCHNICK     = "401"
-	ERR_PASSWDMISMATCH = "464"
-	ERR_NOTREGISTERED  = "451"
+	RPL_NOTICE       = "NOTICE"
+	
 )
 
 func handleNickServMessage(client *Client, message string) {

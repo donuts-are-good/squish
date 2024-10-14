@@ -170,6 +170,10 @@ func commandParser(client *Client, command, params string) bool {
 		log.Println("command: who")
 		targetParts := strings.SplitN(params, " ", 2)
 		handleWho(client, targetParts[0])
+	case "WHOIS":
+		log.Println("command: whois")
+		targetParts := strings.SplitN(params, " ", 2)
+		handleWhois(client, targetParts[0])
 	default:
 		log.Printf("Unhandled command: %s\n", command)
 		client.conn.Write([]byte(fmt.Sprintf(":%s 421 %s %s :Unknown command\r\n", ServerNameString, client.Nickname, command)))
