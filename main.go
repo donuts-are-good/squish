@@ -89,6 +89,8 @@ const (
 	ERR_NOOPERHOST       = "491"
 	ERR_UMODEUNKNOWNFLAG = "501"
 	ERR_USERSDONTMATCH   = "502"
+	RPL_BANLIST          = "367"
+	RPL_ENDOFBANLIST     = "368"
 )
 
 var startTime = time.Now()

@@ -75,6 +75,14 @@ func startDB() (*sqlx.DB, error) {
 			FOREIGN KEY (user_id) REFERENCES users(id),
 			FOREIGN KEY (channel_id) REFERENCES channels(id)
 		);
+
+		CREATE TABLE IF NOT EXISTS channel_bans (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			channel_id INTEGER,
+			mask TEXT,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (channel_id) REFERENCES channels(id)
+		);
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("error creating tables: %v", err)
@@ -242,4 +250,44 @@ func getChannel(name string) (*Channel, error) {
 		return nil, err
 	}
 	return &channel, nil
+}
+
+func addChannelBan(channelID int64, mask string) error {
+	_, err := DB.Exec(`
+		INSERT INTO channel_bans (channel_id, mask)
+		VALUES (?, ?)
+	`, channelID, mask)
+	return err
+}
+
+func removeChannelBan(channelID int64, mask string) error {
+	_, err := DB.Exec(`
+		DELETE FROM channel_bans
+		WHERE channel_id = ? AND mask = ?
+	`, channelID, mask)
+	return err
+}
+
+func isClientBanned(client *Client, channel *Channel) (bool, error) {
+	var banned bool
+	err := DB.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 FROM channel_bans
+			WHERE channel_id = ? AND (
+				? LIKE mask OR
+				? LIKE mask OR
+				? LIKE mask
+			)
+		)
+	`, channel.ID,
+		client.Nickname+"!"+client.Username+"@"+client.Hostname,
+		client.Username+"@"+client.Hostname,
+		client.Hostname).Scan(&banned)
+	return banned, err
+}
+
+func getChannelBans(channelID int64) ([]string, error) {
+	var bans []string
+	err := DB.Select(&bans, "SELECT mask FROM channel_bans WHERE channel_id = ?", channelID)
+	return bans, err
 }
