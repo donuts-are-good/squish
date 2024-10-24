@@ -150,6 +150,8 @@ func handleJoin(client *Client, channelNames string) {
 	log.Printf("Valid channels: %v", validChannels)
 
 	for i, channelName := range validChannels {
+		log.Printf("Processing channel %s for client %s", channelName, client.Nickname)
+
 		// Get the key for this channel, if provided
 		var key string
 		if i < len(keys) {
@@ -179,17 +181,22 @@ func handleJoin(client *Client, channelNames string) {
 		}
 
 		if !isAlreadyInChannel {
-			// Check if the client is banned from the channel
-			isBanned, err := isClientBanned(client, channel)
-			if err != nil {
-				log.Printf("Error checking if client is banned: %v", err)
-				client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :Failed to join channel\r\n", ServerNameString, client.Nickname, channelName)))
-				continue
-			}
-			if isBanned {
-				client.conn.Write([]byte(fmt.Sprintf(":%s 474 %s %s :Cannot join channel (+b)\r\n", ServerNameString, client.Nickname, channelName)))
-				continue
-			}
+			log.Printf("Client %s is not already in channel %s", client.Nickname, channelName)
+
+			// Comment out the ban checking
+			/*
+				// Check if the client is banned from the channel
+				isBanned, err := isClientBanned(client, channel)
+				if err != nil {
+					log.Printf("Error checking if client is banned: %v", err)
+					client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :Failed to join channel\r\n", ServerNameString, client.Nickname, channelName)))
+					continue
+				}
+				if isBanned {
+					client.conn.Write([]byte(fmt.Sprintf(":%s 474 %s %s :Cannot join channel (+b)\r\n", ServerNameString, client.Nickname, channelName)))
+					continue
+				}
+			*/
 
 			// Check if the channel is new (no users yet)
 			userCount, err := getChannelUserCount(channel.ID)
@@ -209,16 +216,20 @@ func handleJoin(client *Client, channelNames string) {
 				client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :Failed to join channel\r\n", ServerNameString, client.Nickname, channelName)))
 				continue
 			}
+			log.Printf("Successfully added client %s to channel %s in the database", client.Nickname, channelName)
 
 			// Add the channel to the client's list of channels
 			client.Channels = append(client.Channels, channel)
+			log.Printf("Added channel %s to client %s's channel list", channelName, client.Nickname)
 
 			// Send JOIN message to the joining client
 			joinMessage := fmt.Sprintf(":%s!%s@%s JOIN %s\r\n", client.Nickname, client.Username, client.Hostname, channelName)
 			client.conn.Write([]byte(joinMessage))
+			log.Printf("Sent JOIN message to client %s for channel %s", client.Nickname, channelName)
 
 			// Send JOIN message to all other clients in the channel
 			broadcastToChannel(channel, joinMessage)
+			log.Printf("Broadcasted JOIN message to all clients in channel %s", channelName)
 
 			// If this is a new channel, inform the user about registration
 			if !channel.IsRegistered {
@@ -230,19 +241,24 @@ func handleJoin(client *Client, channelNames string) {
 				client.conn.Write([]byte(fmt.Sprintf(":%s MODE %s +o %s\r\n", ServerNameString, channelName, client.Nickname)))
 				client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :You are now channel operator of %s\r\n", ServerNameString, client.Nickname, channelName)))
 			}
+		} else {
+			log.Printf("Client %s is already in channel %s", client.Nickname, channelName)
 		}
 
 		// Send the channel topic to the joining client
 		if channel.Topic != "" {
 			client.conn.Write([]byte(fmt.Sprintf(":%s 332 %s %s :%s\r\n", ServerNameString, client.Nickname, channelName, channel.Topic)))
 			client.conn.Write([]byte(fmt.Sprintf(":%s 333 %s %s %s %d\r\n", ServerNameString, client.Nickname, channelName, "Unknown", channel.CreatedAt.Unix())))
+			log.Printf("Sent channel topic to client %s for channel %s", client.Nickname, channelName)
 		}
 
 		// Send names list
 		sendNamesListToClient(client, channel)
+		log.Printf("Sent names list to client %s for channel %s", client.Nickname, channelName)
 	}
 
 	log.Printf("Finished processing JOIN command for client %s", client.Nickname)
+	log.Printf("Client %s is now in channels: %v", client.Nickname, client.Channels)
 }
 
 // Helper function to broadcast a message to all clients in a channel

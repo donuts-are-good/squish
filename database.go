@@ -192,12 +192,28 @@ func addClientToChannel(client *Client, channel *Channel, isOperator bool) error
 }
 
 func removeClientFromChannel(client *Client, channel *Channel) error {
+	log.Printf("Attempting to remove client %s from channel %s", client.Nickname, channel.Name)
 	// Remove from database
 	_, err := DB.Exec(`
 		DELETE FROM user_channels
 		WHERE user_id = ? AND channel_id = ?
 	`, client.ID, channel.ID)
-	return err
+	if err != nil {
+		log.Printf("Error removing client %s from channel %s in database: %v", client.Nickname, channel.Name, err)
+		return err
+	}
+	log.Printf("Successfully removed client %s from channel %s in database", client.Nickname, channel.Name)
+
+	// Remove the channel from the client's list of channels
+	for i, ch := range client.Channels {
+		if ch.ID == channel.ID {
+			client.Channels = append(client.Channels[:i], client.Channels[i+1:]...)
+			log.Printf("Removed channel %s from client %s's channel list", channel.Name, client.Nickname)
+			break
+		}
+	}
+
+	return nil
 }
 
 func getClientsInChannel(channel *Channel) ([]*Client, error) {
