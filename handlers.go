@@ -1261,7 +1261,7 @@ func handleBotCommands(client *Client, channel *Channel, message string) bool {
 		if response != "" {
 			log.Printf("Bot response: %s", response)
 			// Send the response directly to the channel
-			responseMsg := fmt.Sprintf(":%s PRIVMSG %s :%s: %s\r\n", "ServerBot", channel.Name, client.Nickname, response)
+			responseMsg := fmt.Sprintf(":%s PRIVMSG %s : %s\r\n", "BotServ", channel.Name, response)
 			broadcastToChannel(channel, responseMsg)
 			// Also send to the client who issued the command
 			client.conn.Write([]byte(responseMsg))
