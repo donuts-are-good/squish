@@ -188,7 +188,16 @@ func addClientToChannel(client *Client, channel *Channel, isOperator bool) error
 		INSERT INTO user_channels (user_id, channel_id, is_operator)
 		VALUES (?, ?, ?)
 	`, client.ID, channel.ID, isOperator)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Update the client's IsOperator status
+	if isOperator {
+		client.IsOperator = true
+	}
+
+	return nil
 }
 
 func removeClientFromChannel(client *Client, channel *Channel) error {

@@ -250,11 +250,14 @@ func handleJoin(client *Client, channelNames string) {
 			log.Printf("Client %s is already in channel %s", client.Nickname, channelName)
 		}
 
+		// Always send the channel topic and names list, even if the client was already in the channel
 		// Send the channel topic to the joining client
 		if channel.Topic != "" {
 			client.conn.Write([]byte(fmt.Sprintf(":%s 332 %s %s :%s\r\n", ServerNameString, client.Nickname, channelName, channel.Topic)))
 			client.conn.Write([]byte(fmt.Sprintf(":%s 333 %s %s %s %d\r\n", ServerNameString, client.Nickname, channelName, "Unknown", channel.CreatedAt.Unix())))
 			log.Printf("Sent channel topic to client %s for channel %s", client.Nickname, channelName)
+		} else {
+			client.conn.Write([]byte(fmt.Sprintf(":%s 331 %s %s :No topic is set\r\n", ServerNameString, client.Nickname, channelName)))
 		}
 
 		// Send names list
@@ -293,7 +296,13 @@ func sendNamesListToClient(client *Client, channel *Channel) {
 
 	var nicknames []string
 	for _, c := range channelClients {
-		nicknames = append(nicknames, c.Nickname)
+		prefix := ""
+		if c.IsOperator {
+			prefix = "@"
+		} else if c.HasVoice {
+			prefix = "+"
+		}
+		nicknames = append(nicknames, prefix+c.Nickname)
 	}
 
 	// Send names list in chunks of 10 nicknames
