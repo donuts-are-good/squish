@@ -11,6 +11,8 @@ import (
 )
 
 func handlePrivmsg(client *Client, target string, message string) {
+	log.Printf("Handling PRIVMSG: target=%s, message=%s", target, message)
+
 	if strings.EqualFold(target, "ChanServ") {
 		log.Printf("ChanServ command received from %s: %s", client.Nickname, message)
 		ChanServ.HandleMessage(client, strings.TrimPrefix(message, ":"))
@@ -27,11 +29,14 @@ func handlePrivmsg(client *Client, target string, message string) {
 	if strings.HasPrefix(target, "#") {
 		channel := findChannel(target)
 		if channel != nil {
+			log.Printf("Message is for channel %s", channel.Name)
 			if handleBotCommands(client, channel, message) {
+				log.Printf("Bot command handled: %s", message)
 				return
 			}
 			broadcastMessage(channel, client, message)
 		} else {
+			log.Printf("Channel not found: %s", target)
 			client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :No such channel\r\n", ServerNameString, client.Nickname, target)))
 		}
 	} else {
@@ -1210,11 +1215,14 @@ func handleBanList(client *Client, params string) {
 }
 
 func handleBotCommands(client *Client, channel *Channel, message string) bool {
+	log.Printf("Checking for bot command: %s", message)
 	if strings.HasPrefix(message, "!") {
 		parts := strings.Fields(message)
 		command := strings.TrimPrefix(parts[0], "!")
 		args := parts[1:]
 		var response string
+
+		log.Printf("Bot command detected: %s, args: %v", command, args)
 
 		switch command {
 		case "test":
@@ -1225,11 +1233,15 @@ func handleBotCommands(client *Client, channel *Channel, message string) bool {
 			response = strings.Join(args, " ")
 		case "whoami":
 			response = fmt.Sprintf("You are %s (%s@%s)", client.Nickname, client.Username, client.Hostname)
+		case "time":
+			response = time.Now().Format("15:04:05 MST")
 		default:
+			log.Printf("Unknown bot command: %s", command)
 			return false
 		}
 
 		if response != "" {
+			log.Printf("Bot response: %s", response)
 			broadcastMessage(channel, &Client{Nickname: "ServerBot"}, fmt.Sprintf("%s: %s", client.Nickname, response))
 		}
 		return true
