@@ -268,6 +268,7 @@ func handleJoin(client *Client, channelNames string) {
 
 // Helper function to broadcast a message to all clients in a channel
 func broadcastToChannel(channel *Channel, message string) {
+	log.Printf("Broadcasting to channel %s: %s", channel.Name, message)
 	channelClients, err := getClientsInChannel(channel)
 	if err != nil {
 		log.Printf("Error getting clients in channel %s: %v", channel.Name, err)
@@ -275,7 +276,10 @@ func broadcastToChannel(channel *Channel, message string) {
 	}
 	for _, c := range channelClients {
 		if c.conn != nil {
-			c.conn.Write([]byte(message))
+			_, err := c.conn.Write([]byte(message))
+			if err != nil {
+				log.Printf("Error sending message to client %s: %v", c.Nickname, err)
+			}
 		}
 	}
 }
@@ -1218,7 +1222,7 @@ func handleBotCommands(client *Client, channel *Channel, message string) bool {
 	log.Printf("Checking for bot command: %s", message)
 	if strings.HasPrefix(message, "!") {
 		parts := strings.Fields(message)
-		command := strings.TrimPrefix(parts[0], "!")
+		command := strings.ToLower(strings.TrimPrefix(parts[0], "!"))
 		args := parts[1:]
 		var response string
 
@@ -1242,7 +1246,11 @@ func handleBotCommands(client *Client, channel *Channel, message string) bool {
 
 		if response != "" {
 			log.Printf("Bot response: %s", response)
-			broadcastMessage(channel, &Client{Nickname: "ServerBot"}, fmt.Sprintf("%s: %s", client.Nickname, response))
+			// Send the response directly to the channel
+			responseMsg := fmt.Sprintf(":%s PRIVMSG %s :%s: %s\r\n", "ServerBot", channel.Name, client.Nickname, response)
+			broadcastToChannel(channel, responseMsg)
+			// Also send to the client who issued the command
+			client.conn.Write([]byte(responseMsg))
 		}
 		return true
 	}
