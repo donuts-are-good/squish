@@ -1263,10 +1263,14 @@ func handleBotCommands(client *Client, channel *Channel, message string) bool {
 }
 
 func getFortune() string {
-	out, err := exec.Command("fortune").Output()
+	out, err := exec.Command("/usr/games/fortune", "-s").Output()
 	if err != nil {
 		log.Printf("Error running fortune: %v", err)
 		return "Fortune not available. Here's a cookie instead: 🍪"
 	}
-	return strings.TrimSpace(string(out))
+	// Trim any leading/trailing whitespace and newlines
+	fortune := strings.TrimSpace(string(out))
+	// Replace any newlines within the fortune with spaces
+	fortune = strings.ReplaceAll(fortune, "\n", " ")
+	return fortune
 }
