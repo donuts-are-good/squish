@@ -147,33 +147,16 @@ func handleJoin(client *Client, channelNames string) {
 		validChannels = append(validChannels, channelName)
 	}
 
-	// Remove the last element if it's "na"
-	if len(validChannels) > 0 && strings.EqualFold(validChannels[len(validChannels)-1], "#na") {
-		validChannels = validChannels[:len(validChannels)-1]
-	}
-
 	log.Printf("Valid channels: %v", validChannels)
 
 	for i, channelName := range validChannels {
 		log.Printf("Processing channel %s for client %s", channelName, client.Nickname)
-
-		// Get the key for this channel, if provided
-		var key string
-		if i < len(keys) {
-			key = keys[i]
-		}
 
 		// Get or create the channel
 		channel, err := getOrCreateChannel(channelName)
 		if err != nil {
 			log.Printf("Error getting or creating channel %s: %v", channelName, err)
 			client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :Failed to join channel\r\n", ServerNameString, client.Nickname, channelName)))
-			continue
-		}
-
-		// Check if the channel requires a key
-		if channel.Key.Valid && channel.Key.String != "" && key != channel.Key.String {
-			client.conn.Write([]byte(fmt.Sprintf(":%s 475 %s %s :Cannot join channel (+k) - bad key\r\n", ServerNameString, client.Nickname, channelName)))
 			continue
 		}
 
@@ -185,37 +168,11 @@ func handleJoin(client *Client, channelNames string) {
 			continue
 		}
 
+		log.Printf("Is client already in channel: %v", isAlreadyInChannel)
+
 		if !isAlreadyInChannel {
-			log.Printf("Client %s is not already in channel %s", client.Nickname, channelName)
-
-			// Comment out the ban checking
-			/*
-				// Check if the client is banned from the channel
-				isBanned, err := isClientBanned(client, channel)
-				if err != nil {
-					log.Printf("Error checking if client is banned: %v", err)
-					client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :Failed to join channel\r\n", ServerNameString, client.Nickname, channelName)))
-					continue
-				}
-				if isBanned {
-					client.conn.Write([]byte(fmt.Sprintf(":%s 474 %s %s :Cannot join channel (+b)\r\n", ServerNameString, client.Nickname, channelName)))
-					continue
-				}
-			*/
-
-			// Check if the channel is new (no users yet)
-			userCount, err := getChannelUserCount(channel.ID)
-			if err != nil {
-				log.Printf("Error getting channel user count: %v", err)
-				client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :Failed to join channel\r\n", ServerNameString, client.Nickname, channelName)))
-				continue
-			}
-
-			// If the channel is new, add the client as an operator
-			isOperator := userCount == 0
-
 			// Add the client to the channel in the database
-			err = addClientToChannel(client, channel, isOperator)
+			err = addClientToChannel(client, channel, false) // Set isOperator to false by default
 			if err != nil {
 				log.Printf("Error adding client %s to channel %s: %v", client.Nickname, channelName, err)
 				client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :Failed to join channel\r\n", ServerNameString, client.Nickname, channelName)))
@@ -226,31 +183,17 @@ func handleJoin(client *Client, channelNames string) {
 			// Add the channel to the client's list of channels
 			client.Channels = append(client.Channels, channel)
 			log.Printf("Added channel %s to client %s's channel list", channelName, client.Nickname)
-
-			// Send JOIN message to the joining client
-			joinMessage := fmt.Sprintf(":%s!%s@%s JOIN %s\r\n", client.Nickname, client.Username, client.Hostname, channelName)
-			client.conn.Write([]byte(joinMessage))
-			log.Printf("Sent JOIN message to client %s for channel %s", client.Nickname, channelName)
-
-			// Send JOIN message to all other clients in the channel
-			broadcastToChannel(channel, joinMessage)
-			log.Printf("Broadcasted JOIN message to all clients in channel %s", channelName)
-
-			// If this is a new channel, inform the user about registration
-			if !channel.IsRegistered {
-				client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :This channel is not registered. To register it, use /MSG ChanServ REGISTER %s\r\n", ServerNameString, client.Nickname, channelName)))
-			}
-
-			// If the client is now an operator, send them a notice
-			if isOperator {
-				client.conn.Write([]byte(fmt.Sprintf(":%s MODE %s +o %s\r\n", ServerNameString, channelName, client.Nickname)))
-				client.conn.Write([]byte(fmt.Sprintf(":%s NOTICE %s :You are now channel operator of %s\r\n", ServerNameString, client.Nickname, channelName)))
-			}
-		} else {
-			log.Printf("Client %s is already in channel %s", client.Nickname, channelName)
 		}
 
-		// Always send the channel topic and names list, even if the client was already in the channel
+		// Send JOIN message to the joining client
+		joinMessage := fmt.Sprintf(":%s!%s@%s JOIN %s\r\n", client.Nickname, client.Username, client.Hostname, channelName)
+		client.conn.Write([]byte(joinMessage))
+		log.Printf("Sent JOIN message to client %s for channel %s", client.Nickname, channelName)
+
+		// Send JOIN message to all other clients in the channel
+		broadcastToChannel(channel, joinMessage)
+		log.Printf("Broadcasted JOIN message to all clients in channel %s", channelName)
+
 		// Send the channel topic to the joining client
 		if channel.Topic != "" {
 			client.conn.Write([]byte(fmt.Sprintf(":%s 332 %s %s :%s\r\n", ServerNameString, client.Nickname, channelName, channel.Topic)))

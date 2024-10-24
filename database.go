@@ -184,11 +184,13 @@ func getOrCreateChannel(name string) (*Channel, error) {
 }
 
 func addClientToChannel(client *Client, channel *Channel, isOperator bool) error {
+	log.Printf("Adding client %s to channel %s (isOperator: %v)", client.Nickname, channel.Name, isOperator)
 	_, err := DB.Exec(`
 		INSERT INTO user_channels (user_id, channel_id, is_operator)
 		VALUES (?, ?, ?)
 	`, client.ID, channel.ID, isOperator)
 	if err != nil {
+		log.Printf("Error executing SQL to add client to channel: %v", err)
 		return err
 	}
 
@@ -197,6 +199,7 @@ func addClientToChannel(client *Client, channel *Channel, isOperator bool) error
 		client.IsOperator = true
 	}
 
+	log.Printf("Successfully added client %s to channel %s in the database", client.Nickname, channel.Name)
 	return nil
 }
 
