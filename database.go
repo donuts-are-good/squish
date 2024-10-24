@@ -283,7 +283,7 @@ func isClientBanned(client *Client, channel *Channel) (bool, error) {
 		client.Nickname+"!"+client.Username+"@"+client.Hostname,
 		client.Username+"@"+client.Hostname,
 		client.Hostname).Scan(&banned)
-	return banned, err
+	return false, err
 }
 
 func getChannelBans(channelID int64) ([]string, error) {
