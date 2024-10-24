@@ -1220,7 +1220,7 @@ func handleBanList(client *Client, params string) {
 
 func handleBotCommands(client *Client, channel *Channel, message string) bool {
 	log.Printf("Checking for bot command: %s", message)
-	if strings.HasPrefix(message, "!") {
+	if strings.HasPrefix(message, ":!") {
 		parts := strings.Fields(message)
 		log.Printf("Bot command detected: %s, args: %s", parts[0], strings.Join(parts, " "))
 		command := strings.ToLower(strings.TrimPrefix(parts[0], "!"))
