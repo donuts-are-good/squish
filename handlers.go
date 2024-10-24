@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +27,9 @@ func handlePrivmsg(client *Client, target string, message string) {
 	if strings.HasPrefix(target, "#") {
 		channel := findChannel(target)
 		if channel != nil {
+			if handleBotCommands(client, channel, message) {
+				return
+			}
 			broadcastMessage(channel, client, message)
 		} else {
 			client.conn.Write([]byte(fmt.Sprintf(":%s 403 %s %s :No such channel\r\n", ServerNameString, client.Nickname, target)))
@@ -1187,4 +1191,41 @@ func handleBanList(client *Client, params string) {
 	}
 
 	client.sendNumeric(RPL_ENDOFBANLIST, channelName, "End of channel ban list")
+}
+
+func handleBotCommands(client *Client, channel *Channel, message string) bool {
+	if strings.HasPrefix(message, "!") {
+		parts := strings.Fields(message)
+		command := strings.TrimPrefix(parts[0], "!")
+		args := parts[1:]
+		var response string
+
+		switch command {
+		case "test":
+			response = getFortune()
+		case "date":
+			response = time.Now().Format(time.RFC1123)
+		case "echo":
+			response = strings.Join(args, " ")
+		case "whoami":
+			response = fmt.Sprintf("You are %s (%s@%s)", client.Nickname, client.Username, client.Hostname)
+		default:
+			return false
+		}
+
+		if response != "" {
+			broadcastMessage(channel, &Client{Nickname: "ServerBot"}, fmt.Sprintf("%s: %s", client.Nickname, response))
+		}
+		return true
+	}
+	return false
+}
+
+func getFortune() string {
+	out, err := exec.Command("fortune").Output()
+	if err != nil {
+		log.Printf("Error running fortune: %v", err)
+		return "Fortune not available. Here's a cookie instead: 🍪"
+	}
+	return strings.TrimSpace(string(out))
 }
