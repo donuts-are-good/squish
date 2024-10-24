@@ -1220,16 +1220,16 @@ func handleBanList(client *Client, params string) {
 
 func handleBotCommands(client *Client, channel *Channel, message string) bool {
 	log.Printf("Checking for bot command: %s", message)
-	if strings.HasPrefix(message, ":!") {
+	// Remove the leading colon if present
+	message = strings.TrimPrefix(message, ":")
+	if strings.HasPrefix(message, "!") {
 		parts := strings.Fields(message)
-		log.Printf("Bot command detected: %s, args: %s", parts[0], strings.Join(parts, " "))
 		command := strings.ToLower(strings.TrimPrefix(parts[0], "!"))
-		log.Printf("Bot command detected: %s, args: %v", command, parts[1:])
-
 		args := parts[1:]
-		var response string
 
 		log.Printf("Bot command detected: %s, args: %v", command, args)
+
+		var response string
 
 		switch command {
 		case "test":
