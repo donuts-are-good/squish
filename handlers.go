@@ -1233,7 +1233,7 @@ func handleBotCommands(client *Client, channel *Channel, message string) bool {
 
 		switch command {
 		case "test":
-			response = getFortune()
+			response = "This is a test response!"
 		case "date":
 			response = time.Now().Format(time.RFC1123)
 		case "echo":
@@ -1242,6 +1242,8 @@ func handleBotCommands(client *Client, channel *Channel, message string) bool {
 			response = fmt.Sprintf("You are %s (%s@%s)", client.Nickname, client.Username, client.Hostname)
 		case "time":
 			response = time.Now().Format("15:04:05 MST")
+		case "fortune":
+			response = getFortune()
 		default:
 			log.Printf("Unknown bot command: %s", command)
 			return false
