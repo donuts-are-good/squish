@@ -149,7 +149,7 @@ func handleJoin(client *Client, channelNames string) {
 
 	log.Printf("Valid channels: %v", validChannels)
 
-	for i, channelName := range validChannels {
+	for _, channelName := range validChannels {
 		log.Printf("Processing channel %s for client %s", channelName, client.Nickname)
 
 		// Get or create the channel
